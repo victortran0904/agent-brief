@@ -566,7 +566,8 @@ textarea:focus {
   margin-top: 10px;
 }
 
-.analysis-error {
+.analysis-error,
+.work-order-warning {
   color: var(--color-red);
   font-size: 12px;
   margin: 10px 0 0;
