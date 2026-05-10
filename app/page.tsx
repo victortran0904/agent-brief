@@ -80,6 +80,12 @@ type AnalysisReport = {
   cursor_handoff_prompt: string;
 };
 
+type ReceiptState = {
+  required: boolean;
+  items: string[];
+  usedFallback: boolean;
+};
+
 type DemoPreset = {
   id: string;
   title: string;
@@ -116,6 +122,19 @@ const demoPresets: DemoPreset[] = [
       "Use the customer CSV and prior campaign copy as context, but do not expose private customer data. The agent may draft subject lines and segmentation notes, but sending email, importing contacts, using customer names, or changing unsubscribe settings requires explicit approval. Include approve, reject, and custom-instruction decisions before any outbound action.",
   },
 ];
+
+const fallbackReceiptItems = [
+  "Actions taken",
+  "Sources checked",
+  "Decisions made vs. deferred",
+  "Approvals requested",
+  "Money spent",
+  "Files changed",
+  "Remaining uncertainty",
+];
+
+const maxReceiptItems = 8;
+const maxReceiptItemLength = 140;
 
 const defaultReport: AnalysisReport = {
   agent_readiness_score: 39,
@@ -285,9 +304,13 @@ export default function Home() {
     [approvalSelections, customInstructions, report, safetyResolutions],
   );
   const derivedWorkOrder = workOrderState.workOrder;
+  const receiptState = useMemo(
+    () => deriveReceiptState(derivedWorkOrder, report.receipt_template),
+    [derivedWorkOrder, report.receipt_template],
+  );
   const cursorHandoffPrompt = useMemo(
-    () => buildCursorHandoffPrompt(report.cursor_handoff_prompt, derivedWorkOrder, report.receipt_template),
-    [derivedWorkOrder, report.cursor_handoff_prompt, report.receipt_template],
+    () => buildCursorHandoffPrompt(report.cursor_handoff_prompt, derivedWorkOrder, receiptState),
+    [derivedWorkOrder, receiptState, report.cursor_handoff_prompt],
   );
   const rawJson = useMemo(
     () =>
@@ -295,12 +318,13 @@ export default function Home() {
         {
           report,
           updated_work_order: derivedWorkOrder,
+          receipt: receiptState,
           cursor_handoff_prompt: cursorHandoffPrompt,
         },
         null,
         2,
       ),
-    [cursorHandoffPrompt, derivedWorkOrder, report],
+    [cursorHandoffPrompt, derivedWorkOrder, receiptState, report],
   );
 
   function selectPreset(preset: DemoPreset) {
@@ -748,16 +772,27 @@ export default function Home() {
             </pre>
           </section>
 
-          <section className="card">
-            <CardHeader title="Required Agent Receipt" />
-            <div className="receipt-list">
-              {report.receipt_template.map((item) => (
-                <div className="receipt-item" key={item}>
-                  <span aria-hidden="true" className="receipt-box" />
-                  <span>{item}</span>
+          <section className="card" aria-label={receiptState.required ? "Required Agent Receipt" : "Agent Receipt"}>
+            <CardHeader title={receiptState.required ? "Required Agent Receipt" : "Agent Receipt"} />
+            {receiptState.required ? (
+              <>
+                {receiptState.usedFallback ? (
+                  <p className="receipt-note">
+                    Agent Brief used a default receipt checklist because the model did not provide a usable receipt template.
+                  </p>
+                ) : null}
+                <div className="receipt-list">
+                  {receiptState.items.map((item) => (
+                    <div className="receipt-item" key={item}>
+                      <span aria-hidden="true" className="receipt-box" />
+                      <span>{item}</span>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
+              </>
+            ) : (
+              <p className="receipt-note">Receipt not required for this Work Order.</p>
+            )}
           </section>
         </section>
       </main>
@@ -1048,6 +1083,64 @@ function normalizeStringArray(value: unknown) {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && Boolean(item.trim())) : [];
 }
 
+function deriveReceiptState(workOrder: WorkOrder, receiptTemplate: unknown): ReceiptState {
+  const normalizedItems = normalizeReceiptItems(receiptTemplate);
+  const required = workOrder.receipt_required;
+
+  if (!required) {
+    return {
+      required,
+      items: [],
+      usedFallback: false,
+    };
+  }
+
+  if (normalizedItems.length) {
+    return {
+      required,
+      items: normalizedItems,
+      usedFallback: false,
+    };
+  }
+
+  return {
+    required,
+    items: fallbackReceiptItems,
+    usedFallback: true,
+  };
+}
+
+function normalizeReceiptItems(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const seen = new Set<string>();
+  const items: string[] = [];
+
+  for (const item of value) {
+    if (typeof item !== "string") {
+      continue;
+    }
+
+    const trimmed = item.trim();
+    const key = trimmed.toLowerCase();
+
+    if (!trimmed || trimmed.length > maxReceiptItemLength || seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    items.push(trimmed);
+
+    if (items.length >= maxReceiptItems) {
+      break;
+    }
+  }
+
+  return items;
+}
+
 function toNutritionRows(nutritionLabel: AnalysisReport["nutrition_label"]) {
   return Object.entries(nutritionLabel).map(([id, entry]) => ({
     id,
@@ -1220,7 +1313,14 @@ function formatApprovalImpact(item: ApprovalQueueItem, selected: string) {
   return `Updates Work Order: ${effects.join("; ")}.`;
 }
 
-function buildCursorHandoffPrompt(basePrompt: string, workOrder: WorkOrder, receiptTemplate: string[]) {
+function buildCursorHandoffPrompt(basePrompt: string, workOrder: WorkOrder, receiptState: ReceiptState) {
+  const receiptBlock = receiptState.required
+    ? `
+
+Required receipt:
+${receiptState.items.map((item) => `- ${item}`).join("\n")}`
+    : "";
+
   return `${basePrompt}
 
 Updated Work Order
@@ -1230,10 +1330,7 @@ Blocked actions: ${workOrder.blocked_actions.join(", ") || "none"}
 Requires approval: ${workOrder.requires_approval.join(", ") || "none"}
 Missing info to confirm: ${workOrder.missing_info.join(", ") || "none"}
 Success criteria: ${workOrder.success_criteria.join("; ") || "none"}
-${workOrder.custom_instructions?.length ? `Custom instructions: ${workOrder.custom_instructions.join("; ")}\n` : ""}Do not book or purchase anything without explicit approval.
-
-Required receipt:
-${receiptTemplate.map((item) => `- ${item}`).join("\n")}`;
+${workOrder.custom_instructions?.length ? `Custom instructions: ${workOrder.custom_instructions.join("; ")}\n` : ""}Do not book or purchase anything without explicit approval.${receiptBlock}`;
 }
 
 function ScoreCard({ label, value }: { label: string; value: number }) {

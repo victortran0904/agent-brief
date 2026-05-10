@@ -647,6 +647,13 @@ textarea:focus {
   white-space: pre-wrap;
 }
 
+.receipt-note {
+  color: var(--color-fog);
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 0 0 10px;
+}
+
 .receipt-list {
   display: flex;
   flex-direction: column;
