@@ -239,6 +239,12 @@ textarea:focus {
   color: var(--color-white);
 }
 
+.run-button:disabled {
+  border-color: var(--color-border);
+  color: var(--color-ash);
+  cursor: not-allowed;
+}
+
 .scores-row {
   display: grid;
   gap: 12px;
@@ -558,6 +564,21 @@ textarea:focus {
 
 .copy-hint {
   margin-top: 10px;
+}
+
+.handoff-payload {
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  color: var(--color-fog);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  margin: 12px 0 0;
+  max-height: 180px;
+  overflow: auto;
+  padding: 12px;
+  white-space: pre-wrap;
 }
 
 .receipt-list {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 const nutritionRows = [
   {
@@ -54,15 +54,54 @@ const receiptItems = [
   "Remaining uncertainty",
 ];
 
+type WorkspaceScanFile = {
+  path: string;
+  sourceLabel: string;
+  extension: string;
+  sizeBytes: number;
+  content: string;
+  truncated: boolean;
+};
+
+type WorkspaceScanResult = {
+  rootPath: string;
+  maxDepth: number;
+  files: WorkspaceScanFile[];
+};
+
+type HandoffWorkspaceScanFile = Omit<WorkspaceScanFile, "sizeBytes"> & {
+  size: number;
+};
+
+type HandoffWorkspaceScan = {
+  maxDepth: number;
+  files: HandoffWorkspaceScanFile[];
+};
+
+type PreflightHandoff = {
+  task: string;
+  context: string;
+  workspaceScan: HandoffWorkspaceScan;
+};
+
 export default function Home() {
+  const [task, setTask] = useState("Plan my NYC trip next weekend and book whatever is cheapest.");
+  const [context, setContext] = useState(
+    "I have old travel preferences, Gmail access, and a credit card saved in Chrome. I do not know my budget yet.",
+  );
   const [openNutrition, setOpenNutrition] = useState("Staleness risk");
   const [resolvedIssue, setResolvedIssue] = useState(false);
   const [bookingChoice, setBookingChoice] = useState("Recommend only");
   const [copyState, setCopyState] = useState<"idle" | "cursor" | "json">("idle");
   const [leftWidth, setLeftWidth] = useState(48);
+  const [workspaceScan, setWorkspaceScan] = useState<WorkspaceScanResult | null>(null);
+  const [scanError, setScanError] = useState("");
+  const [handoffPayload, setHandoffPayload] = useState<PreflightHandoff | null>(null);
 
   const copyLabel = copyState === "cursor" ? "Copied for Cursor" : "Copy for Cursor";
   const copyJsonLabel = copyState === "json" ? "JSON Copied" : "Copy JSON";
+  const indexedFiles = workspaceScan?.files ?? [];
+  const representativeFiles = indexedFiles.slice(0, 8);
   const bookingImpact = useMemo(() => {
     if (bookingChoice === "Ask before payment") {
       return "Updates Work Order: booking remains blocked until payment approval.";
@@ -71,9 +110,65 @@ export default function Home() {
     return "Updates Work Order: booking and purchase remain blocked.";
   }, [bookingChoice]);
 
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadWorkspaceScan() {
+      try {
+        const response = await fetch("/api/workspace-scan", { cache: "no-store" });
+
+        if (!response.ok) {
+          throw new Error("Workspace scan failed");
+        }
+
+        const scan = (await response.json()) as WorkspaceScanResult;
+
+        if (isMounted) {
+          setWorkspaceScan(scan);
+        }
+      } catch {
+        if (isMounted) {
+          setScanError("Scan unavailable");
+        }
+      }
+    }
+
+    loadWorkspaceScan();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
   function flashCopy(kind: "cursor" | "json") {
     setCopyState(kind);
     window.setTimeout(() => setCopyState("idle"), 1200);
+  }
+
+  function runPreflightCheck() {
+    if (!workspaceScan) {
+      return;
+    }
+
+    setHandoffPayload({
+      task,
+      context,
+      workspaceScan: packageWorkspaceScan(workspaceScan),
+    });
+  }
+
+  function packageWorkspaceScan(scan: WorkspaceScanResult): HandoffWorkspaceScan {
+    return {
+      maxDepth: scan.maxDepth,
+      files: scan.files.map((file) => ({
+        path: file.path,
+        sourceLabel: file.sourceLabel,
+        content: file.content,
+        truncated: file.truncated,
+        size: file.sizeBytes,
+        extension: file.extension,
+      })),
+    };
   }
 
   function startResize(event: React.MouseEvent<HTMLDivElement>) {
@@ -109,10 +204,10 @@ export default function Home() {
         <div className="brand">
           Agent Brief <span>v0.1</span>
         </div>
-        <div className="scan-status" aria-label="Workspace scan placeholder">
+        <div className="scan-status" aria-label="Workspace scan status">
           <span className="status-dot" />
           <span>
-            <strong>6 files</strong> indexed
+            <strong>{scanError ? "0" : indexedFiles.length}</strong> files indexed
           </span>
         </div>
       </nav>
@@ -131,7 +226,7 @@ export default function Home() {
 
           <div className="field">
             <label htmlFor="task">Task</label>
-            <textarea id="task" defaultValue="Plan my NYC trip next weekend and book whatever is cheapest." />
+            <textarea id="task" onChange={(event) => setTask(event.target.value)} value={task} />
           </div>
 
           <div className="field">
@@ -139,27 +234,35 @@ export default function Home() {
             <p>Extra workspace context that is not visible in project files.</p>
             <textarea
               id="context"
-              defaultValue="I have old travel preferences, Gmail access, and a credit card saved in Chrome. I do not know my budget yet."
+              onChange={(event) => setContext(event.target.value)}
+              value={context}
             />
           </div>
 
           <div className="field">
             <div className="field-label">Workspace Files</div>
-            <p>Placeholder file indicators for the later scanner slice.</p>
+            <p>{scanError || `Local scan preview from safe text, config, and documentation sources.`}</p>
             <div className="file-chips" aria-label="Workspace file indicators">
-              {["README.md", "travel-prefs.md", "past-trips.csv", "package.json", "booking-rules.txt", ".env.example"].map(
-                (file) => (
-                  <span className="file-chip" key={file}>
-                    {file}
+              {representativeFiles.length > 0 ? (
+                representativeFiles.map((file) => (
+                  <span className="file-chip" key={file.path} title={`${file.sizeBytes} bytes`}>
+                    {file.sourceLabel}
                   </span>
-                ),
+                ))
+              ) : (
+                <span className="file-chip">{scanError || "Scanning workspace..."}</span>
               )}
             </div>
           </div>
 
-          <button className="run-button" type="button">
+          <button className="run-button" disabled={!workspaceScan} onClick={runPreflightCheck} type="button">
             Run Pre-flight Check
           </button>
+          {handoffPayload ? (
+            <pre aria-label="Pre-flight handoff payload" className="handoff-payload">
+              {JSON.stringify(handoffPayload, null, 2)}
+            </pre>
+          ) : null}
         </section>
 
         <div
