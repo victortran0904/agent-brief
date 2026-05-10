@@ -367,6 +367,169 @@ test("runs analysis with task, extra context, and workspace files, then renders 
   await expect(page.getByLabel("Cursor handoff prompt")).toContainText("Do not book or purchase anything without explicit approval.");
 });
 
+test("normalizes required receipt items and uses the same items in the Cursor handoff", async ({ page }) => {
+  await page.route("**/api/workspace-scan", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        rootPath: "/Users/local/private/workspace",
+        maxDepth: 3,
+        files: [
+          {
+            path: "README.md",
+            sourceLabel: "README.md",
+            extension: ".md",
+            sizeBytes: 12,
+            content: "workspace policy\n",
+            truncated: false,
+          },
+        ],
+      }),
+    });
+  });
+
+  await page.route("**/api/analyze", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        agent_readiness_score: 70,
+        workspace_safety_score: 72,
+        nutrition_label: {},
+        safety_issues: [],
+        approval_queue: [],
+        work_order: {
+          goal: "Refactor the auth module safely.",
+          allowed_actions: ["read", "edit", "test"],
+          blocked_actions: [],
+          requires_approval: [],
+          missing_info: [],
+          success_criteria: ["Return the files changed and tests run"],
+          receipt_required: true,
+        },
+        receipt_template: [" Actions taken ", "Files changed", "actions taken", "Tests run"],
+        cursor_handoff_prompt: "Use this Agent Brief as your execution contract.",
+      }),
+    });
+  });
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "Run Pre-flight Check" }).click();
+
+  const receipt = page.getByLabel("Required Agent Receipt");
+  await expect(receipt).toContainText("Actions taken");
+  await expect(receipt).toContainText("Files changed");
+  await expect(receipt).toContainText("Tests run");
+  await expect(receipt.locator(".receipt-item").filter({ hasText: "Actions taken" })).toHaveCount(1);
+  const receiptItems = (await receipt.locator(".receipt-item").allTextContents()).map((item) => item.trim());
+  expect(receiptItems).toEqual(["Actions taken", "Files changed", "Tests run"]);
+
+  const handoff = page.getByLabel("Cursor handoff prompt");
+  await expect(handoff).toContainText("Required receipt:");
+  const handoffText = await handoff.evaluate((element) =>
+    element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement ? element.value : element.textContent ?? "",
+  );
+  const handoffReceiptItems = handoffText
+    .split("Required receipt:\n")
+    .at(1)
+    ?.split("\n")
+    .filter((line) => line.startsWith("- "))
+    .map((line) => line.slice(2));
+  expect(handoffReceiptItems).toEqual(receiptItems);
+});
+
+test("uses fallback receipt items when a required receipt has no usable template", async ({ page }) => {
+  await page.route("**/api/workspace-scan", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        rootPath: "/Users/local/private/workspace",
+        maxDepth: 3,
+        files: [],
+      }),
+    });
+  });
+
+  await page.route("**/api/analyze", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        agent_readiness_score: 61,
+        workspace_safety_score: 64,
+        nutrition_label: {},
+        safety_issues: [],
+        approval_queue: [],
+        work_order: {
+          goal: "Research deployment options.",
+          allowed_actions: ["research", "summarize"],
+          blocked_actions: [],
+          requires_approval: [],
+          missing_info: [],
+          success_criteria: ["Return recommendation"],
+          receipt_required: true,
+        },
+        receipt_template: ["   ", 42, "x".repeat(141)],
+        cursor_handoff_prompt: "Use this Agent Brief as your execution contract.",
+      }),
+    });
+  });
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "Run Pre-flight Check" }).click();
+
+  const receipt = page.getByLabel("Required Agent Receipt");
+  await expect(receipt).toContainText("Agent Brief used a default receipt checklist");
+  await expect(receipt).toContainText("Actions taken");
+  await expect(receipt).toContainText("Sources checked");
+  await expect(receipt).toContainText("Remaining uncertainty");
+
+  await expect(page.getByLabel("Cursor handoff prompt")).toContainText("- Remaining uncertainty");
+});
+
+test("shows receipt not required and omits receipt block from Cursor handoff", async ({ page }) => {
+  await page.route("**/api/workspace-scan", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        rootPath: "/Users/local/private/workspace",
+        maxDepth: 3,
+        files: [],
+      }),
+    });
+  });
+
+  await page.route("**/api/analyze", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        agent_readiness_score: 90,
+        workspace_safety_score: 92,
+        nutrition_label: {},
+        safety_issues: [],
+        approval_queue: [],
+        work_order: {
+          goal: "Answer a simple question.",
+          allowed_actions: ["answer"],
+          blocked_actions: [],
+          requires_approval: [],
+          missing_info: [],
+          success_criteria: ["Return a concise answer"],
+          receipt_required: false,
+        },
+        receipt_template: ["Actions taken"],
+        cursor_handoff_prompt: "Use this Agent Brief as your execution contract.",
+      }),
+    });
+  });
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "Run Pre-flight Check" }).click();
+
+  const receipt = page.getByLabel("Agent Receipt");
+  await expect(receipt).toContainText("Receipt not required for this Work Order.");
+  await expect(receipt).not.toContainText("Actions taken");
+  await expect(page.getByLabel("Cursor handoff prompt")).not.toContainText("Required receipt:");
+});
+
 test("streams analysis progress and progressively renders the final report", async ({ page }) => {
   await page.route("**/api/workspace-scan", async (route) => {
     await route.fulfill({
