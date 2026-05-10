@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
   <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
 
     :root {
       --color-canvas: #000000;
@@ -17,6 +17,7 @@
       --color-smoke: #464a4d;
       --color-ash: #6c6c6c;
       --color-fog: #a1a4a5;
+      --color-mist: #abafb4;
       --color-frost: #f0f0f0;
       --color-white: #ffffff;
       --color-blue: #3b9eff;
@@ -41,92 +42,187 @@
       color: var(--color-frost);
       min-height: 100vh;
       line-height: 1.5;
+      overflow: hidden;
     }
 
-    /* Nav */
+    /* ── Nav ── */
     .nav {
-      position: sticky;
+      position: fixed;
       top: 0;
+      left: 0;
+      right: 0;
       z-index: 100;
       height: 59px;
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 0 32px;
+      padding: 0 24px;
       border-bottom: 1px solid var(--color-border);
       backdrop-filter: blur(25px);
-      background: rgba(0, 0, 0, 0.8);
+      background: rgba(0, 0, 0, 0.85);
+    }
+
+    .nav-left {
+      display: flex;
+      align-items: center;
+      gap: 20px;
     }
 
     .nav-brand {
-      font-size: 16px;
+      font-size: 15px;
       font-weight: 600;
       color: var(--color-white);
       letter-spacing: -0.02em;
     }
 
     .nav-brand span {
-      color: var(--color-fog);
+      color: var(--color-smoke);
       font-weight: 400;
+      font-size: 12px;
+      margin-left: 4px;
     }
 
-    .nav-actions {
+    .nav-right {
       display: flex;
       align-items: center;
       gap: 16px;
     }
 
-    .nav-link {
+    .scan-status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 12px;
+      background: var(--color-card);
+      border: 1px solid var(--color-border);
+      border-radius: 20px;
+      font-size: 12px;
       color: var(--color-fog);
-      font-size: 14px;
-      text-decoration: none;
-      opacity: 0.71;
     }
 
-    .btn-outline {
-      padding: 8px 16px;
-      border: 1px solid var(--color-blue);
-      border-radius: var(--radius-button);
+    .scan-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--color-green);
+      flex-shrink: 0;
+    }
+
+    .scan-count {
+      font-family: var(--font-mono);
+      color: var(--color-frost);
+    }
+
+    /* State switcher */
+    .state-tabs {
+      display: flex;
+      gap: 2px;
+      background: var(--color-card);
+      border: 1px solid var(--color-border);
+      border-radius: 8px;
+      padding: 3px;
+    }
+
+    .state-tab {
+      padding: 5px 12px;
+      border-radius: 6px;
+      border: none;
       background: transparent;
-      color: var(--color-white);
-      font-size: 14px;
-      font-weight: 500;
+      color: var(--color-fog);
       font-family: var(--font-sans);
+      font-size: 12px;
+      font-weight: 500;
       cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .state-tab.active {
+      background: var(--color-border);
+      color: var(--color-white);
+    }
+
+    .state-tab:hover:not(.active) {
+      color: var(--color-frost);
+    }
+
+    /* ── Main Layout ── */
+    .main {
+      display: flex;
+      margin-top: 59px;
+      height: calc(100vh - 59px);
+    }
+
+    .panel-input {
+      width: 50%;
+      min-width: 340px;
+      max-width: calc(100% - 340px);
+      padding: 40px 36px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 28px;
+    }
+
+    .resize-handle {
+      width: 5px;
+      cursor: col-resize;
+      background: transparent;
+      position: relative;
+      flex-shrink: 0;
+      z-index: 10;
+    }
+
+    .resize-handle::after {
+      content: '';
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      left: 2px;
+      width: 1px;
+      background: var(--color-border);
       transition: background 0.15s ease;
     }
 
-    .btn-outline:hover {
-      background: rgba(59, 158, 255, 0.1);
+    .resize-handle:hover::after,
+    .resize-handle.dragging::after {
+      background: var(--color-blue);
+      width: 2px;
+      left: 1px;
     }
 
-    /* Main Layout */
-    .main {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 0;
-      max-width: 1400px;
-      margin: 0 auto;
-      min-height: calc(100vh - 59px);
+    .panel-output {
+      flex: 1;
+      min-width: 340px;
+      padding: 40px 36px;
+      overflow-y: auto;
     }
 
-    /* Left Panel - Input */
-    .panel-input {
-      padding: 48px 40px;
-      border-right: 1px solid var(--color-border);
-      display: flex;
-      flex-direction: column;
-      gap: 32px;
+    /* scrollbar styling */
+    .panel-input::-webkit-scrollbar,
+    .panel-output::-webkit-scrollbar {
+      width: 6px;
     }
 
+    .panel-input::-webkit-scrollbar-track,
+    .panel-output::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    .panel-input::-webkit-scrollbar-thumb,
+    .panel-output::-webkit-scrollbar-thumb {
+      background: var(--color-border);
+      border-radius: 3px;
+    }
+
+    /* ── Input Panel ── */
     .panel-header {
       display: flex;
       flex-direction: column;
-      gap: 8px;
+      gap: 6px;
     }
 
     .panel-title {
-      font-size: 24px;
+      font-size: 20px;
       font-weight: 600;
       color: var(--color-white);
       letter-spacing: -0.02em;
@@ -135,6 +231,7 @@
     .panel-subtitle {
       font-size: 14px;
       color: var(--color-fog);
+      line-height: 1.5;
     }
 
     .input-group {
@@ -144,7 +241,7 @@
     }
 
     .input-label {
-      font-size: 14px;
+      font-size: 13px;
       font-weight: 500;
       color: var(--color-frost);
     }
@@ -152,16 +249,15 @@
     .input-label-sub {
       font-size: 12px;
       color: var(--color-ash);
-      margin-top: 2px;
     }
 
     textarea {
       width: 100%;
-      min-height: 120px;
-      padding: 16px;
+      min-height: 110px;
+      padding: 14px 16px;
       background: var(--color-card);
       border: 1px solid var(--color-border);
-      border-radius: var(--radius-card);
+      border-radius: 12px;
       color: var(--color-frost);
       font-family: var(--font-sans);
       font-size: 14px;
@@ -179,36 +275,11 @@
       color: var(--color-smoke);
     }
 
-    .workspace-area {
-      min-height: 160px;
-    }
-
-    .file-drop {
-      border: 1px dashed var(--color-border);
-      border-radius: var(--radius-card);
-      padding: 24px;
-      text-align: center;
-      color: var(--color-ash);
-      font-size: 13px;
-      cursor: pointer;
-      transition: border-color 0.15s ease;
-    }
-
-    .file-drop:hover {
-      border-color: var(--color-fog);
-    }
-
-    .file-drop-icon {
-      font-size: 24px;
-      margin-bottom: 8px;
-      opacity: 0.5;
-    }
-
+    /* Workspace file chips */
     .file-chips {
       display: flex;
       flex-wrap: wrap;
-      gap: 8px;
-      margin-top: 12px;
+      gap: 6px;
     }
 
     .file-chip {
@@ -224,89 +295,124 @@
       color: var(--color-fog);
     }
 
+    .file-chip-icon {
+      color: var(--color-smoke);
+      font-size: 11px;
+    }
+
     .file-chip-x {
       color: var(--color-smoke);
       cursor: pointer;
+      margin-left: 2px;
+      font-size: 14px;
+      line-height: 1;
+    }
+
+    .file-chip-x:hover {
+      color: var(--color-red);
     }
 
     .btn-run {
       width: 100%;
-      padding: 14px 24px;
+      padding: 12px 24px;
       background: transparent;
       border: 1px solid var(--color-blue);
       border-radius: var(--radius-button);
       color: var(--color-white);
-      font-size: 15px;
+      font-size: 14px;
       font-weight: 500;
       font-family: var(--font-sans);
       cursor: pointer;
       transition: all 0.15s ease;
-      margin-top: 8px;
     }
 
     .btn-run:hover {
-      background: rgba(59, 158, 255, 0.1);
+      background: rgba(59, 158, 255, 0.08);
     }
 
-    .or-divider {
-      text-align: center;
-      font-size: 12px;
-      color: var(--color-smoke);
-      position: relative;
-    }
-
-    .or-divider::before,
-    .or-divider::after {
-      content: '';
-      position: absolute;
-      top: 50%;
-      width: 40%;
-      height: 1px;
-      background: var(--color-border);
-    }
-
-    .or-divider::before { left: 0; }
-    .or-divider::after { right: 0; }
-
-    /* Right Panel - Output */
-    .panel-output {
-      padding: 48px 40px;
+    .demo-presets {
       display: flex;
       flex-direction: column;
-      gap: 24px;
-      overflow-y: auto;
-      max-height: calc(100vh - 59px);
+      gap: 6px;
     }
 
-    /* Score Cards */
+    .demo-presets-label {
+      font-size: 12px;
+      color: var(--color-smoke);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .demo-preset-row {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .demo-preset {
+      padding: 5px 10px;
+      background: transparent;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-pill);
+      color: var(--color-fog);
+      font-size: 12px;
+      font-family: var(--font-sans);
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .demo-preset:hover {
+      border-color: var(--color-fog);
+      color: var(--color-frost);
+    }
+
+    /* ── Output Panel: Shared ── */
+    .output-content {
+      display: none;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    .output-content.active {
+      display: flex;
+    }
+
+    /* ── Score Cards ── */
     .scores-row {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 16px;
+      gap: 12px;
     }
 
     .score-card {
       background: var(--color-card);
       border: 1px solid var(--color-border);
       border-radius: var(--radius-card);
-      padding: 24px;
+      padding: 20px;
       display: flex;
       flex-direction: column;
-      gap: 8px;
+      gap: 6px;
     }
 
     .score-label {
-      font-size: 12px;
+      font-size: 11px;
       font-weight: 500;
       color: var(--color-fog);
       text-transform: uppercase;
-      letter-spacing: 0.05em;
+      letter-spacing: 0.06em;
     }
 
     .score-value {
-      font-size: 40px;
+      font-size: 36px;
       font-weight: 600;
       letter-spacing: -0.03em;
+      line-height: 1;
+    }
+
+    .score-value .score-unit {
+      font-size: 14px;
+      color: var(--color-smoke);
+      font-weight: 400;
     }
 
     .score-value.low { color: var(--color-red); }
@@ -314,7 +420,7 @@
     .score-value.high { color: var(--color-green); }
 
     .score-bar {
-      height: 4px;
+      height: 3px;
       border-radius: 2px;
       background: var(--color-border);
       overflow: hidden;
@@ -324,155 +430,100 @@
     .score-bar-fill {
       height: 100%;
       border-radius: 2px;
-      transition: width 0.6s ease;
+      transition: width 0.8s cubic-bezier(0.16, 1, 0.3, 1);
     }
 
     .score-bar-fill.low { background: var(--color-red); }
     .score-bar-fill.medium { background: var(--color-yellow); }
     .score-bar-fill.high { background: var(--color-green); }
 
-    /* Output Cards */
+    /* ── Output Cards ── */
     .output-card {
       background: var(--color-card);
       border: 1px solid var(--color-border);
       border-radius: var(--radius-card);
-      padding: 24px;
+      padding: 20px;
     }
 
     .output-card-header {
       display: flex;
       align-items: center;
       gap: 10px;
-      margin-bottom: 16px;
-    }
-
-    .output-card-icon {
-      width: 28px;
-      height: 28px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      border-radius: var(--radius-badge);
-      font-size: 14px;
+      margin-bottom: 14px;
     }
 
     .output-card-title {
-      font-size: 14px;
+      font-size: 13px;
       font-weight: 600;
       color: var(--color-white);
     }
 
     .output-card-count {
       margin-left: auto;
-      font-size: 12px;
+      font-size: 11px;
       color: var(--color-ash);
       font-family: var(--font-mono);
     }
 
-    /* Violations */
-    .violation {
+    /* ── Nutrition Label ── */
+    .nutrition-list {
       display: flex;
-      gap: 12px;
-      padding: 12px 0;
-      border-bottom: 1px solid var(--color-border);
-    }
-
-    .violation:last-child {
-      border-bottom: none;
-      padding-bottom: 0;
-    }
-
-    .violation-code {
-      font-family: var(--font-mono);
-      font-size: 11px;
-      color: var(--color-red);
-      white-space: nowrap;
-      padding-top: 2px;
-    }
-
-    .violation-text {
-      font-size: 13px;
-      color: var(--color-fog);
-      line-height: 1.5;
-    }
-
-    .violation-title {
-      color: var(--color-frost);
-      font-weight: 500;
-      font-size: 13px;
-      margin-bottom: 2px;
-    }
-
-    /* Approval Queue */
-    .approval-item {
-      display: flex;
-      align-items: flex-start;
-      gap: 10px;
-      padding: 10px 0;
-      border-bottom: 1px solid var(--color-border);
-    }
-
-    .approval-item:last-child {
-      border-bottom: none;
-    }
-
-    .approval-number {
-      font-family: var(--font-mono);
-      font-size: 12px;
-      color: var(--color-blue);
-      min-width: 20px;
-    }
-
-    .approval-text {
-      font-size: 13px;
-      color: var(--color-fog);
-    }
-
-    /* Work Order */
-    .work-order {
-      font-family: var(--font-mono);
-      font-size: 13px;
-      line-height: 1.7;
-      color: var(--color-frost);
-      background: var(--color-canvas);
+      flex-direction: column;
+      gap: 1px;
+      background: var(--color-border);
       border: 1px solid var(--color-border);
-      border-radius: 8px;
-      padding: 16px;
-      overflow-x: auto;
+      border-radius: 10px;
+      overflow: hidden;
     }
 
-    .wo-key {
-      color: var(--color-violet);
+    .nutrition-row {
+      background: rgba(0, 0, 0, 0.42);
     }
 
-    .wo-string {
-      color: var(--color-green);
-    }
-
-    .wo-bracket {
-      color: var(--color-fog);
-    }
-
-    /* Nutrition Label */
-    .nutrition-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 12px;
-    }
-
-    .nutrition-item {
+    .nutrition-row-header {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      padding: 8px 12px;
-      background: var(--color-canvas);
-      border: 1px solid var(--color-border);
-      border-radius: 8px;
+      gap: 12px;
+      padding: 11px 14px;
+      border-left: 3px solid transparent;
+      cursor: pointer;
+      transition: border-color 0.15s ease, background 0.15s ease;
+    }
+
+    .nutrition-row-header:hover {
+      background: rgba(255, 255, 255, 0.03);
+    }
+
+    .nutrition-row.active .nutrition-row-header {
+      background: rgba(255, 255, 255, 0.045);
+    }
+
+    .nutrition-row.active[data-risk="high"] .nutrition-row-header {
+      border-left-color: var(--color-red);
+    }
+
+    .nutrition-row.active[data-risk="medium"] .nutrition-row-header {
+      border-left-color: var(--color-yellow);
+    }
+
+    .nutrition-row.active[data-risk="low"] .nutrition-row-header {
+      border-left-color: var(--color-green);
     }
 
     .nutrition-label {
       font-size: 12px;
       color: var(--color-fog);
+    }
+
+    .nutrition-row.active .nutrition-label {
+      color: var(--color-white);
+    }
+
+    .nutrition-row-right {
+      display: flex;
+      align-items: center;
+      gap: 8px;
     }
 
     .nutrition-value {
@@ -485,71 +536,582 @@
     .nutrition-value.risk-medium { color: var(--color-yellow); }
     .nutrition-value.risk-low { color: var(--color-green); }
 
-    /* Empty State */
+    .nutrition-chevron {
+      display: inline-block;
+      color: var(--color-smoke);
+      font-size: 15px;
+      line-height: 1;
+      transition: transform 0.2s ease, color 0.2s ease;
+    }
+
+    .nutrition-row.active .nutrition-chevron {
+      color: var(--color-fog);
+      transform: rotate(90deg);
+    }
+
+    .nutrition-row-detail {
+      max-height: 0;
+      overflow: hidden;
+      padding: 0 14px;
+      transition: max-height 0.24s ease, padding 0.24s ease;
+    }
+
+    .nutrition-row.active .nutrition-row-detail {
+      max-height: 360px;
+      padding: 0 14px 14px 17px;
+    }
+
+    .detail-row {
+      margin-bottom: 10px;
+    }
+
+    .detail-row:last-child {
+      margin-bottom: 0;
+    }
+
+    .detail-label {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--color-ash);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-bottom: 3px;
+    }
+
+    .detail-text {
+      font-size: 12px;
+      color: var(--color-fog);
+      line-height: 1.5;
+    }
+
+    .suggested-text {
+      padding: 8px 10px;
+      border: 1px solid var(--color-border);
+      border-radius: 8px;
+      background: rgba(0, 0, 0, 0.45);
+      color: var(--color-frost);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      line-height: 1.55;
+    }
+
+    /* ── Safety Issues ── */
+    .section-subtitle {
+      color: var(--color-ash);
+      font-size: 12px;
+      margin-top: -8px;
+      margin-bottom: 14px;
+    }
+
+    .violation {
+      display: flex;
+      gap: 12px;
+      padding: 12px 0;
+      border-bottom: 1px solid var(--color-border);
+    }
+
+    .violation:last-child {
+      border-bottom: none;
+      padding-bottom: 0;
+    }
+
+    .violation:first-child {
+      padding-top: 0;
+    }
+
+    .violation-code {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--color-red);
+      white-space: nowrap;
+      padding-top: 1px;
+      min-width: 40px;
+    }
+
+    .violation-title {
+      color: var(--color-frost);
+      font-weight: 500;
+      font-size: 13px;
+      margin-bottom: 2px;
+    }
+
+    .violation-desc {
+      font-size: 12px;
+      color: var(--color-fog);
+      line-height: 1.5;
+    }
+
+    .violation-detail-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-top: 10px;
+    }
+
+    .violation-detail {
+      padding: 10px;
+      border: 1px solid var(--color-border);
+      border-radius: 8px;
+      background: rgba(0, 0, 0, 0.25);
+    }
+
+    .fix-options {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 10px;
+    }
+
+    .fix-option,
+    .approval-option {
+      padding: 6px 9px;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-badge);
+      background: transparent;
+      color: var(--color-fog);
+      font-family: var(--font-sans);
+      font-size: 12px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .fix-option:hover,
+    .approval-option:hover {
+      border-color: var(--color-fog);
+      color: var(--color-frost);
+    }
+
+    .fix-option.selected,
+    .approval-option.selected {
+      border-color: var(--color-blue);
+      color: var(--color-white);
+      background: rgba(59, 158, 255, 0.08);
+    }
+
+    .violation.resolved {
+      opacity: 0.72;
+    }
+
+    .violation.resolved .violation-code {
+      color: var(--color-green);
+    }
+
+    .resolved-badge {
+      display: inline-flex;
+      margin-left: 8px;
+      padding: 2px 6px;
+      border: 1px solid rgba(58, 211, 137, 0.35);
+      border-radius: var(--radius-badge);
+      color: var(--color-green);
+      font-family: var(--font-mono);
+      font-size: 10px;
+      vertical-align: middle;
+    }
+
+    /* ── Approval Queue ── */
+    .approval-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--color-border);
+    }
+
+    .approval-item:last-child {
+      border-bottom: none;
+      padding-bottom: 0;
+    }
+
+    .approval-item:first-child {
+      padding-top: 0;
+    }
+
+    .approval-number {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--color-blue);
+      min-width: 18px;
+      padding-top: 1px;
+    }
+
+    .approval-text {
+      font-size: 13px;
+      color: var(--color-fog);
+      line-height: 1.5;
+    }
+
+    .approval-body {
+      flex: 1;
+    }
+
+    .approval-options {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 10px;
+    }
+
+    .approval-custom {
+      width: 100%;
+      margin-top: 10px;
+      padding: 9px 10px;
+      background: rgba(0, 0, 0, 0.35);
+      border: 1px solid var(--color-border);
+      border-radius: 8px;
+      color: var(--color-frost);
+      font-family: var(--font-sans);
+      font-size: 12px;
+    }
+
+    .approval-impact {
+      margin-top: 8px;
+      color: var(--color-ash);
+      font-size: 12px;
+    }
+
+    /* ── Work Order ── */
+    .work-order-summary {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .work-order-goal {
+      padding: 14px;
+      border: 1px solid var(--color-border);
+      border-radius: 10px;
+      background: rgba(0, 0, 0, 0.35);
+      color: var(--color-frost);
+      font-size: 14px;
+      line-height: 1.55;
+    }
+
+    .work-order-field {
+      display: grid;
+      grid-template-columns: 140px 1fr;
+      gap: 14px;
+      padding-top: 14px;
+      border-top: 1px solid var(--color-border);
+    }
+
+    .work-order-label {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--color-ash);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .work-order-value {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      color: var(--color-fog);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .work-order-chip {
+      padding: 4px 8px;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-badge);
+      background: rgba(255, 255, 255, 0.02);
+      color: var(--color-frost);
+      font-family: var(--font-mono);
+      font-size: 11px;
+    }
+
+    .work-order-chip.safe { color: var(--color-green); }
+    .work-order-chip.blocked { color: var(--color-red); }
+    .work-order-chip.approval { color: var(--color-yellow); }
+
+    .handoff-actions {
+      display: flex;
+      gap: 10px;
+      margin-top: 16px;
+      padding-top: 16px;
+      border-top: 1px solid var(--color-border);
+    }
+
+    .btn-copy-primary,
+    .btn-copy-secondary {
+      padding: 9px 14px;
+      border-radius: var(--radius-button);
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+    }
+
+    .btn-copy-primary {
+      background: transparent;
+      border: 1px solid var(--color-blue);
+      color: var(--color-white);
+    }
+
+    .btn-copy-secondary {
+      background: transparent;
+      border: 1px solid var(--color-border);
+      color: var(--color-fog);
+    }
+
+    .copy-hint {
+      margin-top: 10px;
+      color: var(--color-ash);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    /* ── Receipt ── */
+    .receipt-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 0;
+      border-bottom: 1px solid var(--color-border);
+    }
+
+    .receipt-item:last-child {
+      border-bottom: none;
+      padding-bottom: 0;
+    }
+
+    .receipt-item:first-child {
+      padding-top: 0;
+    }
+
+    .receipt-check {
+      width: 16px;
+      height: 16px;
+      border: 1px solid var(--color-border);
+      border-radius: 3px;
+      flex-shrink: 0;
+    }
+
+    .receipt-text {
+      font-size: 13px;
+      color: var(--color-fog);
+    }
+
+    /* ── Empty State ── */
     .empty-state {
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: center;
       height: 100%;
+      min-height: 400px;
       gap: 16px;
-      opacity: 0.5;
-    }
-
-    .empty-state-icon {
-      font-size: 48px;
-    }
-
-    .empty-state-text {
-      font-size: 14px;
-      color: var(--color-fog);
       text-align: center;
+      padding: 40px;
     }
 
-    /* Workspace scan indicator */
-    .scan-status {
+    .empty-icon {
+      width: 64px;
+      height: 64px;
+      border-radius: 16px;
+      border: 1px solid var(--color-border);
       display: flex;
       align-items: center;
-      gap: 8px;
-      padding: 10px 14px;
-      background: var(--color-card);
-      border: 1px solid var(--color-border);
-      border-radius: var(--radius-badge);
+      justify-content: center;
+      font-size: 28px;
+      opacity: 0.4;
+    }
+
+    .empty-title {
+      font-size: 16px;
+      font-weight: 500;
+      color: var(--color-fog);
+    }
+
+    .empty-subtitle {
+      font-size: 13px;
+      color: var(--color-smoke);
+      max-width: 280px;
+      line-height: 1.5;
+    }
+
+    /* ── Loading State ── */
+    .loading-section {
+      opacity: 0;
+      transform: translateY(8px);
+      animation: fadeSlideIn 0.4s ease forwards;
+    }
+
+    @keyframes fadeSlideIn {
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .skeleton {
+      background: linear-gradient(90deg, var(--color-border) 25%, var(--color-smoke) 50%, var(--color-border) 75%);
+      background-size: 200% 100%;
+      animation: shimmer 1.5s ease-in-out infinite;
+      border-radius: 4px;
+    }
+
+    @keyframes shimmer {
+      0% { background-position: 200% 0; }
+      100% { background-position: -200% 0; }
+    }
+
+    .skeleton-line {
+      height: 12px;
+      margin-bottom: 8px;
+    }
+
+    .skeleton-line:last-child {
+      margin-bottom: 0;
+    }
+
+    .skeleton-line.w-75 { width: 75%; }
+    .skeleton-line.w-60 { width: 60%; }
+    .skeleton-line.w-90 { width: 90%; }
+    .skeleton-line.w-45 { width: 45%; }
+
+    .streaming-cursor {
+      display: inline-block;
+      width: 2px;
+      height: 14px;
+      background: var(--color-blue);
+      margin-left: 2px;
+      animation: blink 0.8s step-end infinite;
+      vertical-align: middle;
+    }
+
+    @keyframes blink {
+      50% { opacity: 0; }
+    }
+
+    .loading-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+
+    .loading-spinner {
+      width: 14px;
+      height: 14px;
+      border: 2px solid var(--color-border);
+      border-top-color: var(--color-blue);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .loading-status {
       font-size: 12px;
       color: var(--color-fog);
     }
 
-    .scan-dot {
-      width: 6px;
-      height: 6px;
-      border-radius: 50%;
-      background: var(--color-green);
+    /* ── Error State ── */
+    .error-card {
+      background: var(--color-card);
+      border: 1px solid rgba(255, 149, 146, 0.3);
+      border-radius: var(--radius-card);
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
     }
 
-    .scan-count {
+    .error-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .error-icon {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      background: rgba(255, 149, 146, 0.12);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+      color: var(--color-red);
+      flex-shrink: 0;
+    }
+
+    .error-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--color-red);
+    }
+
+    .error-message {
+      font-size: 13px;
+      color: var(--color-fog);
+      line-height: 1.6;
+    }
+
+    .error-code {
       font-family: var(--font-mono);
-      color: var(--color-frost);
+      font-size: 12px;
+      color: var(--color-smoke);
+      padding: 12px;
+      background: rgba(0, 0, 0, 0.4);
+      border: 1px solid var(--color-border);
+      border-radius: 8px;
+    }
+
+    .btn-retry {
+      align-self: flex-start;
+      padding: 8px 16px;
+      background: transparent;
+      border: 1px solid var(--color-blue);
+      border-radius: var(--radius-button);
+      color: var(--color-white);
+      font-size: 13px;
+      font-weight: 500;
+      font-family: var(--font-sans);
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .btn-retry:hover {
+      background: rgba(59, 158, 255, 0.08);
+    }
+
+    /* prevent text selection during resize */
+    body.resizing {
+      user-select: none;
+      cursor: col-resize;
     }
   </style>
 </head>
 <body>
 
-  <!-- Navigation -->
+  <!-- ── Navigation ── -->
   <nav class="nav">
-    <div class="nav-brand">Agent Brief <span>v0.1</span></div>
-    <div class="nav-actions">
+    <div class="nav-left">
+      <div class="nav-brand">Agent Brief<span>v0.1</span></div>
+      <div class="state-tabs">
+        <button class="state-tab active" data-state="success">Success</button>
+        <button class="state-tab" data-state="empty">Empty</button>
+        <button class="state-tab" data-state="loading">Loading</button>
+        <button class="state-tab" data-state="error">Error</button>
+      </div>
+    </div>
+    <div class="nav-right">
       <div class="scan-status">
         <div class="scan-dot"></div>
-        <span>Workspace: <span class="scan-count">23 files</span> indexed</span>
+        <span><span class="scan-count">23 files</span> indexed</span>
       </div>
     </div>
   </nav>
 
-  <!-- Main Two-Panel Layout -->
+  <!-- ── Main Two-Panel Layout ── -->
   <main class="main">
 
     <!-- Left Panel: Input -->
-    <section class="panel-input">
+    <section class="panel-input" id="panelInput">
       <div class="panel-header">
         <h1 class="panel-title">Pre-flight Check</h1>
         <p class="panel-subtitle">Describe what you want the agent to do. Agent Brief will audit the task and your workspace before the agent starts.</p>
@@ -557,209 +1119,667 @@
 
       <div class="input-group">
         <label class="input-label">Task</label>
-        <textarea placeholder="Plan my NYC trip next weekend and book whatever is cheapest.">Plan my NYC trip next weekend and book whatever is cheapest.</textarea>
+        <textarea id="taskInput" placeholder="e.g. Plan my NYC trip next weekend and book whatever is cheapest.">Plan my NYC trip next weekend and book whatever is cheapest.</textarea>
       </div>
 
       <div class="input-group">
-        <label class="input-label">Workspace Context</label>
-        <p class="input-label-sub">Describe what the agent will work with, or drop files below.</p>
-        <textarea class="workspace-area" placeholder="I have a Google Doc with old travel preferences, a spreadsheet of past trips, access to my Gmail, and my credit card saved in Chrome.">I have a Google Doc with old travel preferences, a spreadsheet of past trips, access to my Gmail, and my credit card saved in Chrome. I usually prefer morning flights but not too early. I don't know my budget yet.</textarea>
+        <label class="input-label">Additional Context</label>
+        <p class="input-label-sub">Extra info the agent needs that isn't in your workspace files.</p>
+        <textarea placeholder="e.g. I have Gmail access, a saved credit card, and old travel preferences in a Google Doc.">I have a Google Doc with old travel preferences, a spreadsheet of past trips, access to my Gmail, and my credit card saved in Chrome. I usually prefer morning flights but not too early. I don't know my budget yet.</textarea>
       </div>
 
       <div class="input-group">
-        <div class="or-divider">or scan workspace</div>
-        <div class="file-drop">
-          <div class="file-drop-icon">↑</div>
-          Drop files here or click to browse
-        </div>
+        <label class="input-label">Workspace Files</label>
+        <p class="input-label-sub">Detected from your repo. These will be sent as context.</p>
         <div class="file-chips">
-          <div class="file-chip">travel-prefs.md <span class="file-chip-x">×</span></div>
-          <div class="file-chip">past-trips.csv <span class="file-chip-x">×</span></div>
-          <div class="file-chip">booking-rules.txt <span class="file-chip-x">×</span></div>
+          <div class="file-chip"><span class="file-chip-icon">📄</span> README.md <span class="file-chip-x">×</span></div>
+          <div class="file-chip"><span class="file-chip-icon">📄</span> travel-prefs.md <span class="file-chip-x">×</span></div>
+          <div class="file-chip"><span class="file-chip-icon">📄</span> past-trips.csv <span class="file-chip-x">×</span></div>
+          <div class="file-chip"><span class="file-chip-icon">⚙️</span> package.json <span class="file-chip-x">×</span></div>
+          <div class="file-chip"><span class="file-chip-icon">📄</span> booking-rules.txt <span class="file-chip-x">×</span></div>
+          <div class="file-chip"><span class="file-chip-icon">📄</span> .env.example <span class="file-chip-x">×</span></div>
         </div>
       </div>
 
-      <button class="btn-run">Run Pre-flight Check →</button>
+      <button class="btn-run" id="btnRun">Run Pre-flight Check →</button>
+
+      <div class="demo-presets">
+        <div class="demo-presets-label">Demo presets</div>
+        <div class="demo-preset-row">
+          <button class="demo-preset">NYC Travel Booking</button>
+          <button class="demo-preset">Code Refactor</button>
+          <button class="demo-preset">Email Campaign</button>
+        </div>
+      </div>
     </section>
 
+    <!-- Resize Handle -->
+    <div class="resize-handle" id="resizeHandle"></div>
+
     <!-- Right Panel: Output -->
-    <section class="panel-output">
+    <section class="panel-output" id="panelOutput">
 
-      <!-- Scores -->
-      <div class="scores-row">
-        <div class="score-card">
-          <div class="score-label">Agent Readiness</div>
-          <div class="score-value low">39</div>
-          <div class="score-bar">
-            <div class="score-bar-fill low" style="width: 39%"></div>
-          </div>
-        </div>
-        <div class="score-card">
-          <div class="score-label">Workspace Safety</div>
-          <div class="score-value medium">46</div>
-          <div class="score-bar">
-            <div class="score-bar-fill medium" style="width: 46%"></div>
-          </div>
+      <!-- ════════════════════════════════════════
+           STATE: EMPTY
+           ════════════════════════════════════════ -->
+      <div class="output-content" id="state-empty">
+        <div class="empty-state">
+          <div class="empty-icon">⚡</div>
+          <div class="empty-title">No analysis yet</div>
+          <div class="empty-subtitle">Describe a task on the left and run a pre-flight check. The analysis report will appear here.</div>
         </div>
       </div>
 
-      <!-- Context Nutrition Label -->
-      <div class="output-card">
-        <div class="output-card-header">
-          <div class="output-card-title">Context Nutrition Label</div>
+      <!-- ════════════════════════════════════════
+           STATE: LOADING / STREAMING
+           ════════════════════════════════════════ -->
+      <div class="output-content" id="state-loading">
+        <div class="loading-header">
+          <div class="loading-spinner"></div>
+          <span class="loading-status">Analyzing task and workspace…<span class="streaming-cursor"></span></span>
         </div>
-        <div class="nutrition-grid">
-          <div class="nutrition-item">
-            <span class="nutrition-label">Goal clarity</span>
-            <span class="nutrition-value risk-medium">Medium</span>
+
+        <!-- Scores appear first -->
+        <div class="loading-section scores-row" style="animation-delay: 0.1s">
+          <div class="score-card">
+            <div class="score-label">Agent Readiness</div>
+            <div class="score-value low">39<span class="score-unit">/100</span></div>
+            <div class="score-bar">
+              <div class="score-bar-fill low" style="width: 39%"></div>
+            </div>
           </div>
-          <div class="nutrition-item">
-            <span class="nutrition-label">Missing fields</span>
-            <span class="nutrition-value risk-high">5</span>
+          <div class="score-card">
+            <div class="score-label">Workspace Safety</div>
+            <div class="skeleton" style="height: 36px; width: 60px; margin-top: 4px; border-radius: 6px;"></div>
+            <div class="score-bar">
+              <div class="score-bar-fill" style="width: 0%"></div>
+            </div>
           </div>
-          <div class="nutrition-item">
-            <span class="nutrition-label">Staleness risk</span>
-            <span class="nutrition-value risk-high">High</span>
+        </div>
+
+        <!-- Nutrition label streaming in -->
+        <div class="loading-section output-card" style="animation-delay: 0.6s">
+          <div class="output-card-header">
+            <div class="output-card-title">Context Nutrition Label</div>
           </div>
-          <div class="nutrition-item">
-            <span class="nutrition-label">Privacy risk</span>
-            <span class="nutrition-value risk-medium">Medium</span>
+          <div class="nutrition-grid">
+            <div class="nutrition-item">
+              <span class="nutrition-label">Goal clarity</span>
+              <span class="nutrition-value risk-medium">Medium</span>
+            </div>
+            <div class="nutrition-item">
+              <span class="nutrition-label">Missing fields</span>
+              <span class="nutrition-value risk-high">5</span>
+            </div>
+            <div class="nutrition-item">
+              <span class="nutrition-label">Staleness risk</span>
+              <span class="nutrition-value risk-high">High</span>
+            </div>
+            <div class="nutrition-item">
+              <span class="nutrition-label">Privacy risk</span>
+              <div class="skeleton" style="height: 14px; width: 50px;"></div>
+            </div>
+            <div class="nutrition-item">
+              <span class="nutrition-label">Irreversibility</span>
+              <div class="skeleton" style="height: 14px; width: 40px;"></div>
+            </div>
+            <div class="nutrition-item">
+              <span class="nutrition-label">Agent confusion</span>
+              <div class="skeleton" style="height: 14px; width: 35px;"></div>
+            </div>
           </div>
-          <div class="nutrition-item">
-            <span class="nutrition-label">Irreversibility</span>
-            <span class="nutrition-value risk-high">High</span>
+        </div>
+
+        <!-- Safety Issues partially streamed -->
+        <div class="loading-section output-card" style="animation-delay: 1.2s">
+          <div class="output-card-header">
+            <div class="output-card-title">Safety Issues</div>
+            <div class="output-card-count">streaming…</div>
           </div>
-          <div class="nutrition-item">
-            <span class="nutrition-label">Agent confusion</span>
-            <span class="nutrition-value risk-medium">37%</span>
+          <div class="section-subtitle">Agent OSHA violations — what could go wrong if this runs now.</div>
+          <div class="violation">
+            <div class="violation-code">V-001</div>
+            <div>
+              <div class="violation-title">Vibes instead of constraints</div>
+              <div class="violation-desc">"Whatever is cheapest" conflicts with unstated comfort preferences.</div>
+            </div>
           </div>
+          <div class="violation">
+            <div class="violation-code">V-007</div>
+            <div>
+              <div class="violation-title">Irreversible action without approval</div>
+              <div class="violation-desc">Booking is financial and irreversible<span class="streaming-cursor"></span></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Skeleton for upcoming sections -->
+        <div class="loading-section output-card" style="animation-delay: 1.8s">
+          <div class="output-card-header">
+            <div class="output-card-title" style="color: var(--color-smoke)">Approval Queue</div>
+          </div>
+          <div class="skeleton skeleton-line w-90"></div>
+          <div class="skeleton skeleton-line w-75"></div>
+          <div class="skeleton skeleton-line w-60"></div>
+        </div>
+
+        <div class="loading-section output-card" style="animation-delay: 2.4s; opacity: 0.5;">
+          <div class="output-card-header">
+            <div class="output-card-title" style="color: var(--color-smoke)">Agent Work Order</div>
+          </div>
+          <div class="skeleton skeleton-line w-90"></div>
+          <div class="skeleton skeleton-line w-75"></div>
+          <div class="skeleton skeleton-line w-60"></div>
+          <div class="skeleton skeleton-line w-45"></div>
         </div>
       </div>
 
-      <!-- OSHA Violations -->
-      <div class="output-card">
-        <div class="output-card-header">
-          <div class="output-card-title">OSHA Violations</div>
-          <div class="output-card-count">5 found</div>
-        </div>
-        <div class="violation">
-          <div class="violation-code">V-001</div>
-          <div>
-            <div class="violation-title">Vibes instead of constraints</div>
-            <div class="violation-text">"Whatever is cheapest" conflicts with unstated comfort preferences.</div>
+      <!-- ════════════════════════════════════════
+           STATE: SUCCESS
+           ════════════════════════════════════════ -->
+      <div class="output-content active" id="state-success">
+
+        <!-- Scores -->
+        <div class="scores-row">
+          <div class="score-card">
+            <div class="score-label">Agent Readiness</div>
+            <div class="score-value low">39<span class="score-unit">/100</span></div>
+            <div class="score-bar">
+              <div class="score-bar-fill low" style="width: 39%"></div>
+            </div>
+          </div>
+          <div class="score-card">
+            <div class="score-label">Workspace Safety</div>
+            <div class="score-value medium">46<span class="score-unit">/100</span></div>
+            <div class="score-bar">
+              <div class="score-bar-fill medium" style="width: 46%"></div>
+            </div>
           </div>
         </div>
-        <div class="violation">
-          <div class="violation-code">V-007</div>
-          <div>
-            <div class="violation-title">Irreversible action without approval</div>
-            <div class="violation-text">Booking is financial and irreversible without approval gate.</div>
+
+        <!-- Context Nutrition Label -->
+        <div class="output-card">
+          <div class="output-card-header">
+            <div class="output-card-title">Context Nutrition Label</div>
+            <div class="output-card-count">click rows</div>
+          </div>
+          <div class="nutrition-list">
+            <div class="nutrition-row" data-risk="medium">
+              <div class="nutrition-row-header">
+                <span class="nutrition-label">Goal clarity</span>
+                <span class="nutrition-row-right">
+                  <span class="nutrition-value risk-medium">Medium</span>
+                  <span class="nutrition-chevron">›</span>
+                </span>
+              </div>
+              <div class="nutrition-row-detail">
+                <div class="detail-row">
+                  <div class="detail-label">Why</div>
+                  <div class="detail-text">The task says to plan a trip, but the success criteria and tradeoffs are underspecified.</div>
+                </div>
+                <div class="detail-row">
+                  <div class="detail-label">Suggested prompt patch</div>
+                  <div class="suggested-text">Prioritize total trip cost under $1,200, but avoid flights before 7am.</div>
+                </div>
+              </div>
+            </div>
+            <div class="nutrition-row" data-risk="high">
+              <div class="nutrition-row-header">
+                <span class="nutrition-label">Missing fields</span>
+                <span class="nutrition-row-right">
+                  <span class="nutrition-value risk-high">5</span>
+                  <span class="nutrition-chevron">›</span>
+                </span>
+              </div>
+              <div class="nutrition-row-detail">
+                <div class="detail-row">
+                  <div class="detail-label">Actionable items</div>
+                  <div class="detail-text">Add budget, exact dates, departure airport, refundability preference, and whether booking is allowed.</div>
+                </div>
+              </div>
+            </div>
+            <div class="nutrition-row active" data-risk="high">
+              <div class="nutrition-row-header">
+                <span class="nutrition-label">Staleness risk</span>
+                <span class="nutrition-row-right">
+                  <span class="nutrition-value risk-high">High</span>
+                  <span class="nutrition-chevron">›</span>
+                </span>
+              </div>
+              <div class="nutrition-row-detail">
+                <div class="detail-row">
+                  <div class="detail-label">Why</div>
+                  <div class="detail-text">The workspace mentions old travel preferences with no freshness date, so the agent may optimize for outdated preferences.</div>
+                </div>
+                <div class="detail-row">
+                  <div class="detail-label">Evidence</div>
+                  <div class="detail-text">"I have a Google Doc with old travel preferences."</div>
+                </div>
+                <div class="detail-row">
+                  <div class="detail-label">Suggested prompt patch</div>
+                  <div class="suggested-text">Only use travel preferences confirmed after Jan 2026. If preference freshness is unclear, ask before using it.</div>
+                </div>
+                <div class="detail-row">
+                  <div class="detail-label">Expected impact</div>
+                  <div class="detail-text">Reduces staleness risk and makes the source-of-truth rule explicit in the Work Order.</div>
+                </div>
+              </div>
+            </div>
+            <div class="nutrition-row" data-risk="medium">
+              <div class="nutrition-row-header">
+                <span class="nutrition-label">Privacy risk</span>
+                <span class="nutrition-row-right">
+                  <span class="nutrition-value risk-medium">Medium</span>
+                  <span class="nutrition-chevron">›</span>
+                </span>
+              </div>
+              <div class="nutrition-row-detail">
+                <div class="detail-row">
+                  <div class="detail-label">Fix</div>
+                  <div class="detail-text">Scope Gmail access to search-only and block sharing personal info with vendors.</div>
+                </div>
+              </div>
+            </div>
+            <div class="nutrition-row" data-risk="high">
+              <div class="nutrition-row-header">
+                <span class="nutrition-label">Irreversibility</span>
+                <span class="nutrition-row-right">
+                  <span class="nutrition-value risk-high">High</span>
+                  <span class="nutrition-chevron">›</span>
+                </span>
+              </div>
+              <div class="nutrition-row-detail">
+                <div class="detail-row">
+                  <div class="detail-label">Fix</div>
+                  <div class="detail-text">Require explicit approval before booking, purchasing, sending messages, or using saved payment information.</div>
+                </div>
+              </div>
+            </div>
+            <div class="nutrition-row" data-risk="medium">
+              <div class="nutrition-row-header">
+                <span class="nutrition-label">Agent confusion</span>
+                <span class="nutrition-row-right">
+                  <span class="nutrition-value risk-medium">37%</span>
+                  <span class="nutrition-chevron">›</span>
+                </span>
+              </div>
+              <div class="nutrition-row-detail">
+                <div class="detail-row">
+                  <div class="detail-label">Expected impact</div>
+                  <div class="detail-text">Answering the approval queue should reduce confusion by turning ambiguity into explicit permissions.</div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
-        <div class="violation">
-          <div class="violation-code">V-014</div>
-          <div>
-            <div class="violation-title">Stale source risk</div>
-            <div class="violation-text">"Old travel preferences" may be outdated — no freshness date.</div>
+
+        <!-- Safety Issues -->
+        <div class="output-card">
+          <div class="output-card-header">
+            <div class="output-card-title">Safety Issues</div>
+            <div class="output-card-count">3 open · 2 resolved</div>
+          </div>
+          <div class="section-subtitle">Agent OSHA violations — each item explains the risk, evidence, fix, and benefit.</div>
+          <div class="violation">
+            <div class="violation-code">V-001</div>
+            <div>
+              <div class="violation-title">Vibes instead of constraints</div>
+              <div class="violation-desc">Risk: the agent may optimize only for price and ignore comfort, timing, or cancellation tradeoffs.</div>
+              <div class="violation-detail-grid">
+                <div class="violation-detail">
+                  <div class="detail-label">Evidence</div>
+                  <div class="detail-text">"whatever is cheapest"</div>
+                </div>
+                <div class="violation-detail">
+                  <div class="detail-label">Benefit</div>
+                  <div class="detail-text">Turns vague preference into success criteria the agent can follow.</div>
+                </div>
+              </div>
+              <div class="fix-options">
+                <button class="fix-option selected">Prefer cheapest refundable</button>
+                <button class="fix-option">Avoid red-eyes</button>
+                <button class="fix-option">Custom constraint</button>
+              </div>
+            </div>
+          </div>
+          <div class="violation resolved">
+            <div class="violation-code">V-007</div>
+            <div>
+              <div class="violation-title">Irreversible action without approval <span class="resolved-badge">Resolved</span></div>
+              <div class="violation-desc">Risk: the agent could book a non-refundable trip or spend money. Fixed by blocking booking/purchase and requiring approval.</div>
+              <div class="fix-options">
+                <button class="fix-option selected">Research only; do not book</button>
+                <button class="fix-option">Ask before payment</button>
+              </div>
+            </div>
+          </div>
+          <div class="violation">
+            <div class="violation-code">V-014</div>
+            <div>
+              <div class="violation-title">Stale source risk</div>
+              <div class="violation-desc">Risk: the agent may rely on outdated travel preferences. Ask the user to confirm the source or ignore it.</div>
+              <div class="fix-options">
+                <button class="fix-option">Use only confirmed preferences</button>
+                <button class="fix-option">Ask before using old docs</button>
+              </div>
+            </div>
+          </div>
+          <div class="violation">
+            <div class="violation-code">V-022</div>
+            <div>
+              <div class="violation-title">Permission ambiguity</div>
+              <div class="violation-desc">Risk: broad Gmail and saved-card access could expose private data or enable payment without scope limits.</div>
+              <div class="fix-options">
+                <button class="fix-option">Search Gmail only</button>
+                <button class="fix-option">Never use saved card</button>
+                <button class="fix-option">No vendor sharing</button>
+              </div>
+            </div>
+          </div>
+          <div class="violation resolved">
+            <div class="violation-code">V-031</div>
+            <div>
+              <div class="violation-title">Missing receipt requirement <span class="resolved-badge">Resolved</span></div>
+              <div class="violation-desc">Fixed by requiring a receipt with actions taken, sources checked, approvals requested, money spent, and uncertainty.</div>
+            </div>
           </div>
         </div>
-        <div class="violation">
-          <div class="violation-code">V-022</div>
-          <div>
-            <div class="violation-title">Permission ambiguity</div>
-            <div class="violation-text">Gmail and saved credit card permissions are too broad.</div>
+
+        <!-- Approval Queue -->
+        <div class="output-card">
+          <div class="output-card-header">
+            <div class="output-card-title">Approval Queue</div>
+            <div class="output-card-count">5 items</div>
+          </div>
+          <div class="approval-item">
+            <div class="approval-number">01</div>
+            <div class="approval-body">
+              <div class="approval-text">What is your maximum budget for this trip?</div>
+              <div class="approval-options">
+                <button class="approval-option">$800</button>
+                <button class="approval-option selected">$1,200</button>
+                <button class="approval-option">$1,800</button>
+                <button class="approval-option">Custom</button>
+              </div>
+              <div class="approval-impact">Updates Work Order: total trip budget must stay under $1,200.</div>
+            </div>
+          </div>
+          <div class="approval-item">
+            <div class="approval-number">02</div>
+            <div class="approval-body">
+              <div class="approval-text">Can the agent book directly, or should it only recommend options?</div>
+              <div class="approval-options">
+                <button class="approval-option selected">Recommend only</button>
+                <button class="approval-option">Ask before payment</button>
+                <button class="approval-option">Allow under budget</button>
+              </div>
+              <div class="approval-impact">Updates Work Order: booking and purchase remain blocked.</div>
+            </div>
+          </div>
+          <div class="approval-item">
+            <div class="approval-number">03</div>
+            <div class="approval-body">
+              <div class="approval-text">Are non-refundable options acceptable?</div>
+              <div class="approval-options">
+                <button class="approval-option selected">No</button>
+                <button class="approval-option">Only if 20% cheaper</button>
+                <button class="approval-option">Custom</button>
+              </div>
+            </div>
+          </div>
+          <div class="approval-item">
+            <div class="approval-number">04</div>
+            <div class="approval-body">
+              <div class="approval-text">Which airport should the agent prioritize?</div>
+              <div class="approval-options">
+                <button class="approval-option selected">SFO</button>
+                <button class="approval-option">OAK</button>
+                <button class="approval-option">SJC</button>
+              </div>
+            </div>
+          </div>
+          <div class="approval-item">
+            <div class="approval-number">05</div>
+            <div class="approval-body">
+              <div class="approval-text">May the agent share personal information with travel vendors?</div>
+              <div class="approval-options">
+                <button class="approval-option selected">No vendor sharing</button>
+                <button class="approval-option">Ask first</button>
+                <button class="approval-option">Custom</button>
+              </div>
+              <input class="approval-custom" value="Do not enter passport, payment, or loyalty account details." aria-label="Custom approval instruction">
+            </div>
           </div>
         </div>
-        <div class="violation">
-          <div class="violation-code">V-031</div>
-          <div>
-            <div class="violation-title">Missing receipt requirement</div>
-            <div class="violation-text">No receipt requirement specified — agent won't report actions taken.</div>
+
+        <!-- Agent Work Order -->
+        <div class="output-card">
+          <div class="output-card-header">
+            <div class="output-card-title">Agent Work Order</div>
+            <div class="output-card-count">Execution contract</div>
+          </div>
+          <div class="work-order-summary">
+            <div class="work-order-goal">Research weekend NYC travel options under $1,200. Compare viable flights and hotels, but do not book anything, purchase anything, share personal information, or use payment information.</div>
+
+            <div class="work-order-field">
+              <div class="work-order-label">Allowed</div>
+              <div class="work-order-value">
+                <span class="work-order-chip safe">search</span>
+                <span class="work-order-chip safe">compare</span>
+                <span class="work-order-chip safe">summarize</span>
+              </div>
+            </div>
+
+            <div class="work-order-field">
+              <div class="work-order-label">Blocked</div>
+              <div class="work-order-value">
+                <span class="work-order-chip blocked">purchase</span>
+                <span class="work-order-chip blocked">book</span>
+                <span class="work-order-chip blocked">send personal info</span>
+                <span class="work-order-chip blocked">use saved card</span>
+              </div>
+            </div>
+
+            <div class="work-order-field">
+              <div class="work-order-label">Ask First</div>
+              <div class="work-order-value">
+                <span class="work-order-chip approval">payment</span>
+                <span class="work-order-chip approval">booking</span>
+                <span class="work-order-chip approval">non-refundable options</span>
+                <span class="work-order-chip approval">stale preferences</span>
+              </div>
+            </div>
+
+            <div class="work-order-field">
+              <div class="work-order-label">Missing Info</div>
+              <div class="work-order-value">Exact dates still need confirmation. Budget, airport, refundability, and booking permissions have been resolved.</div>
+            </div>
+
+            <div class="work-order-field">
+              <div class="work-order-label">Success</div>
+              <div class="work-order-value">Return 3 viable options with prices, timing, cancellation policy, tradeoffs, sources checked, and unresolved assumptions.</div>
+            </div>
+          </div>
+
+          <div class="handoff-actions">
+            <button class="btn-copy-primary">Copy for Cursor</button>
+            <button class="btn-copy-secondary">Copy JSON</button>
+          </div>
+          <div class="copy-hint">Primary handoff is a readable Cursor-ready prompt. JSON stays available as a secondary export for agents/tools that prefer structure.</div>
+        </div>
+
+        <!-- Receipt Template -->
+        <div class="output-card">
+          <div class="output-card-header">
+            <div class="output-card-title">Required Agent Receipt</div>
+          </div>
+          <div class="receipt-item">
+            <div class="receipt-check"></div>
+            <div class="receipt-text">Actions taken</div>
+          </div>
+          <div class="receipt-item">
+            <div class="receipt-check"></div>
+            <div class="receipt-text">Sources checked</div>
+          </div>
+          <div class="receipt-item">
+            <div class="receipt-check"></div>
+            <div class="receipt-text">Decisions made vs. deferred</div>
+          </div>
+          <div class="receipt-item">
+            <div class="receipt-check"></div>
+            <div class="receipt-text">Approvals requested</div>
+          </div>
+          <div class="receipt-item">
+            <div class="receipt-check"></div>
+            <div class="receipt-text">Money spent</div>
+          </div>
+          <div class="receipt-item">
+            <div class="receipt-check"></div>
+            <div class="receipt-text">Files changed</div>
+          </div>
+          <div class="receipt-item">
+            <div class="receipt-check"></div>
+            <div class="receipt-text">Remaining uncertainty</div>
           </div>
         </div>
+
       </div>
 
-      <!-- Approval Queue -->
-      <div class="output-card">
-        <div class="output-card-header">
-          <div class="output-card-title">Approval Queue</div>
-          <div class="output-card-count">5 items</div>
-        </div>
-        <div class="approval-item">
-          <div class="approval-number">01</div>
-          <div class="approval-text">What is your maximum budget for this trip?</div>
-        </div>
-        <div class="approval-item">
-          <div class="approval-number">02</div>
-          <div class="approval-text">Can the agent book directly, or should it only recommend options?</div>
-        </div>
-        <div class="approval-item">
-          <div class="approval-number">03</div>
-          <div class="approval-text">Are non-refundable options acceptable?</div>
-        </div>
-        <div class="approval-item">
-          <div class="approval-number">04</div>
-          <div class="approval-text">Which airport should the agent prioritize?</div>
-        </div>
-        <div class="approval-item">
-          <div class="approval-number">05</div>
-          <div class="approval-text">May the agent share personal information with travel vendors?</div>
-        </div>
-      </div>
+      <!-- ════════════════════════════════════════
+           STATE: ERROR
+           ════════════════════════════════════════ -->
+      <div class="output-content" id="state-error">
 
-      <!-- Agent Work Order -->
-      <div class="output-card">
-        <div class="output-card-header">
-          <div class="output-card-title">Agent Work Order</div>
+        <!-- Show scores that arrived before the error -->
+        <div class="scores-row" style="opacity: 0.5;">
+          <div class="score-card">
+            <div class="score-label">Agent Readiness</div>
+            <div class="score-value" style="color: var(--color-smoke);">—</div>
+            <div class="score-bar">
+              <div class="score-bar-fill" style="width: 0%"></div>
+            </div>
+          </div>
+          <div class="score-card">
+            <div class="score-label">Workspace Safety</div>
+            <div class="score-value" style="color: var(--color-smoke);">—</div>
+            <div class="score-bar">
+              <div class="score-bar-fill" style="width: 0%"></div>
+            </div>
+          </div>
         </div>
-        <pre class="work-order"><span class="wo-bracket">{</span>
-  <span class="wo-key">"goal"</span>: <span class="wo-string">"Research travel options for a weekend trip"</span>,
-  <span class="wo-key">"allowed_actions"</span>: [<span class="wo-string">"search"</span>, <span class="wo-string">"compare"</span>, <span class="wo-string">"summarize"</span>],
-  <span class="wo-key">"blocked_actions"</span>: [<span class="wo-string">"purchase"</span>, <span class="wo-string">"book"</span>, <span class="wo-string">"send_personal_info"</span>],
-  <span class="wo-key">"requires_approval"</span>: [<span class="wo-string">"payment"</span>, <span class="wo-string">"booking"</span>],
-  <span class="wo-key">"missing_info"</span>: [<span class="wo-string">"budget"</span>, <span class="wo-string">"exact dates"</span>, <span class="wo-string">"airport"</span>],
-  <span class="wo-key">"success_criteria"</span>: [<span class="wo-string">"3 viable options"</span>, <span class="wo-string">"prices cited"</span>],
-  <span class="wo-key">"receipt_required"</span>: <span class="wo-string">true</span>
-<span class="wo-bracket">}</span></pre>
-      </div>
 
-      <!-- Receipt Template -->
-      <div class="output-card">
-        <div class="output-card-header">
-          <div class="output-card-title">Required Agent Receipt</div>
+        <div class="error-card">
+          <div class="error-header">
+            <div class="error-icon">!</div>
+            <div class="error-title">Analysis failed</div>
+          </div>
+          <div class="error-message">
+            The LLM returned an incomplete response. This usually happens when the model is overloaded or the request timed out. Your task and workspace data were not sent to any third party.
+          </div>
+          <div class="error-code">Error: STREAM_INTERRUPTED — Connection closed after 12.4s
+Received 342 of ~2048 expected tokens
+Model: deepseek-v3 via api.clod.io</div>
+          <button class="btn-retry">Retry Analysis →</button>
         </div>
-        <div class="approval-item">
-          <div class="approval-number">□</div>
-          <div class="approval-text">Actions taken</div>
-        </div>
-        <div class="approval-item">
-          <div class="approval-number">□</div>
-          <div class="approval-text">Sources checked</div>
-        </div>
-        <div class="approval-item">
-          <div class="approval-number">□</div>
-          <div class="approval-text">Decisions made vs. deferred</div>
-        </div>
-        <div class="approval-item">
-          <div class="approval-number">□</div>
-          <div class="approval-text">Approvals requested</div>
-        </div>
-        <div class="approval-item">
-          <div class="approval-number">□</div>
-          <div class="approval-text">Money spent</div>
-        </div>
-        <div class="approval-item">
-          <div class="approval-number">□</div>
-          <div class="approval-text">Files changed</div>
-        </div>
-        <div class="approval-item">
-          <div class="approval-number">□</div>
-          <div class="approval-text">Remaining uncertainty</div>
-        </div>
+
       </div>
 
     </section>
   </main>
+
+  <script>
+    // ── State Switching ──
+    document.querySelectorAll('.state-tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        document.querySelectorAll('.state-tab').forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+
+        const state = tab.dataset.state;
+        document.querySelectorAll('.output-content').forEach(c => c.classList.remove('active'));
+        document.getElementById('state-' + state).classList.add('active');
+
+        if (state === 'loading') {
+          document.querySelectorAll('#state-loading .loading-section').forEach(s => {
+            s.style.animation = 'none';
+            s.offsetHeight;
+            s.style.animation = '';
+          });
+        }
+      });
+    });
+
+    // ── Prototype Interactions ──
+    document.querySelectorAll('.nutrition-row-header').forEach(header => {
+      header.addEventListener('click', () => {
+        const row = header.closest('.nutrition-row');
+        const list = row.closest('.nutrition-list');
+        const wasActive = row.classList.contains('active');
+
+        list.querySelectorAll('.nutrition-row').forEach(item => item.classList.remove('active'));
+
+        if (!wasActive) {
+          row.classList.add('active');
+        }
+      });
+    });
+
+    document.querySelectorAll('.fix-option').forEach(option => {
+      option.addEventListener('click', (event) => {
+        const group = event.currentTarget.closest('.fix-options');
+        group.querySelectorAll('.fix-option').forEach(button => button.classList.remove('selected'));
+        event.currentTarget.classList.add('selected');
+
+        const issue = event.currentTarget.closest('.violation');
+        if (issue) issue.classList.add('resolved');
+      });
+    });
+
+    document.querySelectorAll('.approval-option').forEach(option => {
+      option.addEventListener('click', (event) => {
+        const group = event.currentTarget.closest('.approval-options');
+        group.querySelectorAll('.approval-option').forEach(button => button.classList.remove('selected'));
+        event.currentTarget.classList.add('selected');
+      });
+    });
+
+    document.querySelectorAll('.btn-copy-primary, .btn-copy-secondary').forEach(button => {
+      button.addEventListener('click', () => {
+        const original = button.textContent;
+        button.textContent = original.includes('JSON') ? 'JSON Copied' : 'Copied for Cursor';
+        setTimeout(() => {
+          button.textContent = original;
+        }, 1400);
+      });
+    });
+
+    // ── Resizable Panels ──
+    const handle = document.getElementById('resizeHandle');
+    const panelInput = document.getElementById('panelInput');
+    let isResizing = false;
+
+    handle.addEventListener('mousedown', (e) => {
+      isResizing = true;
+      document.body.classList.add('resizing');
+      handle.classList.add('dragging');
+      e.preventDefault();
+    });
+
+    document.addEventListener('mousemove', (e) => {
+      if (!isResizing) return;
+      const containerWidth = document.querySelector('.main').offsetWidth;
+      const newWidth = (e.clientX / containerWidth) * 100;
+      const clamped = Math.min(Math.max(newWidth, 25), 75);
+      panelInput.style.width = clamped + '%';
+    });
+
+    document.addEventListener('mouseup', () => {
+      if (isResizing) {
+        isResizing = false;
+        document.body.classList.remove('resizing');
+        handle.classList.remove('dragging');
+      }
+    });
+  </script>
 
 </body>
 </html>
