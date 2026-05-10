@@ -3,7 +3,17 @@ import { NextResponse } from "next/server";
 export const dynamic = "force-dynamic";
 
 const CLOD_CHAT_COMPLETIONS_URL = "https://api.clod.io/v1/chat/completions";
-const MODEL = "DeepSeek V3";
+
+/** Model id must match the CLōD catalog (see https://app.clod.io/auth/models). Override with `CLOD_MODEL` if you need a different model. */
+function resolveClodModel(): string {
+  const configured = process.env.CLOD_MODEL?.trim();
+
+  if (configured) {
+    return configured;
+  }
+
+  return "Qwen 3 235B A22B Thinking 2507";
+}
 
 /** Per https://clod.io/docs — omitting max_completion_tokens relies on model defaults and often truncates large JSON outputs. */
 const MAX_COMPLETION_TOKENS = 8192;
@@ -131,21 +141,133 @@ export async function POST(request: Request) {
 /** Parses assistant message text into the Agent Brief report object (handles ```json fences and leading prose). */
 export function extractAnalysisJsonFromMessage(content: string): Record<string, unknown> {
   const trimmed = content.trim();
-  const fenceMatch = trimmed.match(/```(?:json)?\s*\n?([\s\S]*?)```/);
-  let candidate = fenceMatch ? fenceMatch[1].trim() : trimmed;
 
-  try {
-    return JSON.parse(candidate) as Record<string, unknown>;
-  } catch {
-    const start = candidate.indexOf("{");
-    const end = candidate.lastIndexOf("}");
+  const direct = tryParseReportJson(trimmed);
 
-    if (start === -1 || end <= start) {
-      throw new Error("No JSON object in model content");
+  if (direct) {
+    return direct;
+  }
+
+  const fences = collectMarkdownFences(trimmed);
+
+  for (const body of fences) {
+    const fromFence = tryParseReportJson(body);
+
+    if (fromFence) {
+      return fromFence;
     }
 
-    return JSON.parse(candidate.slice(start, end + 1)) as Record<string, unknown>;
+    const balanced = extractFirstBalancedJsonObject(body);
+
+    if (balanced) {
+      const fromBalanced = tryParseReportJson(balanced);
+
+      if (fromBalanced) {
+        return fromBalanced;
+      }
+    }
   }
+
+  const balancedOuter = extractFirstBalancedJsonObject(trimmed);
+
+  if (balancedOuter) {
+    const fromOuter = tryParseReportJson(balancedOuter);
+
+    if (fromOuter) {
+      return fromOuter;
+    }
+  }
+
+  throw new Error("No JSON object in model content");
+}
+
+function tryParseReportJson(text: string): Record<string, unknown> | null {
+  try {
+    const value = JSON.parse(text) as unknown;
+
+    return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Ordered: ```json``` bodies first (longest wins), then other fenced bodies (longest wins). */
+function collectMarkdownFences(trimmed: string): string[] {
+  const re = /```(\w*)\s*\n?([\s\S]*?)```/g;
+  const jsonBodies: string[] = [];
+  const otherBodies: string[] = [];
+  let match: RegExpExecArray | null;
+
+  while ((match = re.exec(trimmed))) {
+    const lang = (match[1] || "").toLowerCase();
+    const body = match[2].trim();
+
+    if (!body) {
+      continue;
+    }
+
+    if (lang === "json") {
+      jsonBodies.push(body);
+    } else {
+      otherBodies.push(body);
+    }
+  }
+
+  const sortLongestFirst = (a: string, b: string) => b.length - a.length;
+
+  return [...jsonBodies.sort(sortLongestFirst), ...otherBodies.sort(sortLongestFirst)];
+}
+
+/** First top-level `{ ... }` using brace depth (strings respected); avoids greedy `lastIndexOf("}")`. */
+export function extractFirstBalancedJsonObject(source: string): string | null {
+  const start = source.indexOf("{");
+
+  if (start === -1) {
+    return null;
+  }
+
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+
+  for (let i = start; i < source.length; i += 1) {
+    const ch = source[i];
+
+    if (escape) {
+      escape = false;
+      continue;
+    }
+
+    if (inString) {
+      if (ch === "\\") {
+        escape = true;
+        continue;
+      }
+
+      if (ch === '"') {
+        inString = false;
+      }
+
+      continue;
+    }
+
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
+
+    if (ch === "{") {
+      depth += 1;
+    } else if (ch === "}") {
+      depth -= 1;
+
+      if (depth === 0) {
+        return source.slice(start, i + 1);
+      }
+    }
+  }
+
+  return null;
 }
 
 export function buildClodRequest({ apiKey, task, context, workspaceFiles }: ClodRequestInput) {
@@ -160,7 +282,7 @@ export function buildClodRequest({ apiKey, task, context, workspaceFiles }: Clod
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: MODEL,
+        model: resolveClodModel(),
         temperature: 0.2,
         max_completion_tokens: MAX_COMPLETION_TOKENS,
         response_format: { type: "json_object" },

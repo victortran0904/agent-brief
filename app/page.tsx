@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent, MouseEvent } from "react";
 
 type WorkspaceScanFile = {
@@ -135,6 +135,20 @@ const fallbackReceiptItems = [
 
 const maxReceiptItems = 8;
 const maxReceiptItemLength = 140;
+
+function syncTextareaHeight(element: HTMLTextAreaElement | null) {
+  if (!element) {
+    return;
+  }
+
+  const maxPx = typeof window !== "undefined" ? Math.min(window.innerHeight * 0.5, 400) : 400;
+
+  element.style.height = "auto";
+  const contentHeight = element.scrollHeight;
+  const nextHeight = Math.max(118, Math.min(contentHeight, maxPx));
+
+  element.style.height = `${nextHeight}px`;
+}
 
 const defaultReport: AnalysisReport = {
   agent_readiness_score: 39,
@@ -283,17 +297,19 @@ export default function Home() {
   const [copyState, setCopyState] = useState<"idle" | "cursor" | "json">("idle");
   const [copyNotice, setCopyNotice] = useState<string | null>(null);
   const [leftWidth, setLeftWidth] = useState(48);
+  const [showReportPanel, setShowReportPanel] = useState(false);
   const [workspaceScan, setWorkspaceScan] = useState<WorkspaceScanResult | null>(null);
   const [scanError, setScanError] = useState("");
   const [report, setReport] = useState<AnalysisReport>(defaultReport);
   const [analysisError, setAnalysisError] = useState("");
   const [analysisStatus, setAnalysisStatus] = useState("");
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [lastAnalyzePayload, setLastAnalyzePayload] = useState<PreflightRequest | null>(null);
   const [safetyResolutions, setSafetyResolutions] = useState<Record<string, string>>({});
   const [approvalSelections, setApprovalSelections] = useState<Record<string, string>>({});
   const [customInstructions, setCustomInstructions] = useState<Record<string, string>>({});
   const analysisRequestIdRef = useRef(0);
+  const taskTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const contextTextareaRef = useRef<HTMLTextAreaElement>(null);
 
   const copyLabel = copyState === "cursor" ? "Copied for Cursor" : "Copy for Cursor";
   const copyJsonLabel = copyState === "json" ? "JSON Copied" : "Copy JSON";
@@ -321,6 +337,14 @@ export default function Home() {
     [derivedWorkOrder, receiptState, report.cursor_handoff_prompt],
   );
   const workOrderLive = useMemo(() => !workOrdersEqual(derivedWorkOrder, baselineWorkOrder), [baselineWorkOrder, derivedWorkOrder]);
+  useLayoutEffect(() => {
+    syncTextareaHeight(taskTextareaRef.current);
+  }, [task]);
+
+  useLayoutEffect(() => {
+    syncTextareaHeight(contextTextareaRef.current);
+  }, [context]);
+
   const rawJson = useMemo(
     () =>
       JSON.stringify(
@@ -344,7 +368,9 @@ export default function Home() {
     setAnalysisError("");
     setAnalysisStatus("");
     setIsAnalyzing(false);
-    setLastAnalyzePayload(null);
+    setCopyNotice(null);
+    setCopyState("idle");
+    setShowReportPanel(false);
     setReport(defaultReport);
     setSafetyResolutions({});
     setApprovalSelections({});
@@ -400,7 +426,7 @@ export default function Home() {
       workspaceFiles: packageWorkspaceScan(workspaceScan).files,
     };
 
-    setLastAnalyzePayload(payload);
+    setShowReportPanel(false);
     setIsAnalyzing(true);
     setAnalysisError("");
     setAnalysisStatus("Starting analysis...");
@@ -432,10 +458,7 @@ export default function Home() {
 
         if (chunk.type === "progress") {
           setAnalysisStatus(chunk.message ?? "Streaming analysis results...");
-          return;
         }
-
-        setReport(normalizeReport(chunk.report));
       });
 
       if (!isCurrentAnalysis()) {
@@ -447,6 +470,7 @@ export default function Home() {
       setSafetyResolutions({});
       setApprovalSelections({});
       setCustomInstructions({});
+      setShowReportPanel(true);
     } catch (error) {
       if (isCurrentAnalysis()) {
         setAnalysisError(error instanceof Error ? error.message : "Analysis failed. Check CLOD_API_KEY and try again.");
@@ -514,11 +538,14 @@ export default function Home() {
         </div>
       </nav>
 
-      <main className="app-shell" data-testid="app-shell">
+      <main
+        className={`app-shell${showReportPanel ? " app-shell--split" : " app-shell--input-only"}`}
+        data-testid="app-shell"
+      >
         <section
           className="input-panel"
           data-testid="input-panel"
-          style={{ width: `${leftWidth}%` }}
+          style={{ width: showReportPanel ? `${leftWidth}%` : "100%" }}
           aria-labelledby="input-title"
         >
           <header className="panel-header">
@@ -548,11 +575,14 @@ export default function Home() {
           <div className="field">
             <label htmlFor="task">Task</label>
             <textarea
+              className="textarea-auto-grow"
               id="task"
+              ref={taskTextareaRef}
               onChange={(event) => {
                 setSelectedPresetId("");
                 setTask(event.target.value);
               }}
+              rows={4}
               value={task}
             />
           </div>
@@ -561,11 +591,14 @@ export default function Home() {
             <label htmlFor="context">Additional Context</label>
             <p>Extra workspace context that is not visible in project files.</p>
             <textarea
+              className="textarea-auto-grow"
               id="context"
+              ref={contextTextareaRef}
               onChange={(event) => {
                 setSelectedPresetId("");
                 setContext(event.target.value);
               }}
+              rows={5}
               value={context}
             />
           </div>
@@ -589,7 +622,22 @@ export default function Home() {
           <button className="run-button" disabled={!workspaceScan || isAnalyzing} onClick={runPreflightCheck} type="button">
             {isAnalyzing ? "Analyzing..." : "Run Pre-flight Check"}
           </button>
-          {analysisStatus ? (
+          {isAnalyzing ? (
+            <div aria-busy="true" aria-live="polite" className="analysis-processing" data-testid="analysis-processing">
+              <div aria-hidden="true" className="analysis-processing-spinner" />
+              <div className="analysis-processing-body">
+                <div className="analysis-processing-title">Running analysis</div>
+                <div className="analysis-processing-bar" aria-hidden="true">
+                  <div className="analysis-processing-bar-fill" />
+                </div>
+                {analysisStatus ? (
+                  <p className="analysis-processing-status">{analysisStatus}</p>
+                ) : (
+                  <p className="analysis-processing-status">Auditing task, workspace context, and safety signals…</p>
+                )}
+              </div>
+            </div>
+          ) : analysisStatus ? (
             <p className="analysis-status" role="status">
               {analysisStatus}
             </p>
@@ -599,27 +647,26 @@ export default function Home() {
               {analysisError}
             </p>
           ) : null}
-          {lastAnalyzePayload ? (
-            <pre aria-label="Pre-flight handoff payload" className="handoff-payload">
-              {JSON.stringify(lastAnalyzePayload, null, 2)}
-            </pre>
-          ) : null}
         </section>
 
-        <div
-          aria-orientation="vertical"
-          aria-label="Resize panels"
-          aria-valuemax={72}
-          aria-valuemin={32}
-          aria-valuenow={leftWidth}
-          className="resize-handle"
-          onKeyDown={resizeWithKeyboard}
-          onMouseDown={startResize}
-          role="separator"
-          tabIndex={0}
-        />
+        {showReportPanel ? (
+          <div
+            aria-orientation="vertical"
+            aria-label="Resize panels"
+            aria-valuemax={72}
+            aria-valuemin={32}
+            aria-valuenow={leftWidth}
+            className="resize-handle report-region-enter"
+            data-testid="resize-handle"
+            onKeyDown={resizeWithKeyboard}
+            onMouseDown={startResize}
+            role="separator"
+            tabIndex={0}
+          />
+        ) : null}
 
-        <section className="output-panel" data-testid="output-panel" aria-label="Agent Brief report">
+        {showReportPanel ? (
+        <section className="output-panel report-region-enter" data-testid="output-panel" aria-label="Agent Brief report">
           <div className="scores-row">
             <ScoreCard label="Agent Readiness" value={report.agent_readiness_score} />
             <ScoreCard label="Workspace Safety" value={report.workspace_safety_score} />
@@ -788,23 +835,13 @@ export default function Home() {
               </p>
             ) : null}
             <p className="copy-hint">
-              Copy packages this Work Order for Cursor—you run the agent locally; Agent Brief does not execute it. Full JSON sits in the export
-              panel below.
+              Copy packages this Work Order for Cursor—you run the agent locally; Agent Brief does not execute it. Copy JSON copies the full
+              structured export to your clipboard when you need it elsewhere.
             </p>
             <pre aria-label="Cursor handoff prompt" className="handoff-payload handoff-preview">
               {cursorHandoffPrompt}
             </pre>
           </section>
-
-          <details className="card json-export" aria-label="Full JSON export">
-            <summary className="json-export-summary">
-              <span className="json-export-title">Full JSON export</span>
-              <span className="json-export-meta">collapsed — model output + patched Work Order</span>
-            </summary>
-            <pre aria-label="Raw analysis JSON" className="handoff-payload json-export-pre">
-              {rawJson}
-            </pre>
-          </details>
 
           <section className="card" aria-label={receiptState.required ? "Required Agent Receipt" : "Agent Receipt"}>
             <CardHeader title={receiptState.required ? "Required Agent Receipt" : "Agent Receipt"} />
@@ -829,13 +866,14 @@ export default function Home() {
             )}
           </section>
         </section>
+        ) : null}
       </main>
     </>
   );
 
   async function copyText(text: string, kind: "cursor" | "json") {
     if (!navigator.clipboard?.writeText) {
-      setCopyNotice("Clipboard API unavailable in this context. Select the text in the handoff or JSON panel and copy manually.");
+      setCopyNotice("Clipboard API unavailable in this context. Select the handoff text and copy manually.");
       return;
     }
 
@@ -848,12 +886,6 @@ export default function Home() {
     }
   }
 }
-
-type PreflightRequest = {
-  task: string;
-  context: string;
-  workspaceFiles: HandoffWorkspaceScanFile[];
-};
 
 type AnalysisFailure = {
   error?: string;
