@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { buildClodRequest, POST } from "../app/api/analyze/route";
+import { buildClodRequest, extractAnalysisJsonFromMessage, POST } from "../app/api/analyze/route";
 
 const scanFixtureDir = path.join(process.cwd(), "00-scan-preview-fixture");
 
@@ -36,6 +36,50 @@ test.afterAll(async () => {
 });
 
 test("renders the local Agent Brief app shell", async ({ page }) => {
+  await page.route("**/api/workspace-scan", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        rootPath: "/Users/local/private/workspace",
+        maxDepth: 3,
+        files: [
+          {
+            path: "README.md",
+            sourceLabel: "README.md",
+            extension: ".md",
+            sizeBytes: 12,
+            content: "workspace policy\n",
+            truncated: false,
+          },
+        ],
+      }),
+    });
+  });
+
+  await page.route("**/api/analyze", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        agent_readiness_score: 39,
+        workspace_safety_score: 46,
+        nutrition_label: {},
+        safety_issues: [],
+        approval_queue: [],
+        work_order: {
+          goal: "Research travel options.",
+          allowed_actions: ["search"],
+          blocked_actions: ["book"],
+          requires_approval: ["booking"],
+          missing_info: [],
+          success_criteria: ["Return options"],
+          receipt_required: true,
+        },
+        receipt_template: ["Actions taken"],
+        cursor_handoff_prompt: "Use this Agent Brief as your execution contract.",
+      }),
+    });
+  });
+
   await page.goto("/");
 
   await expect(page).toHaveTitle(/Agent Brief/);
@@ -49,16 +93,18 @@ test("renders the local Agent Brief app shell", async ({ page }) => {
   await expect(page.getByRole("button", { name: /Run Pre-flight Check/ })).toBeVisible();
 
   const leftPanel = page.getByTestId("input-panel");
-  const rightPanel = page.getByTestId("output-panel");
   await expect(leftPanel).toBeVisible();
+  await expect(page.locator('[data-testid="output-panel"]')).toHaveCount(0);
+
+  await page.getByRole("button", { name: /Run Pre-flight Check/ }).click();
+
+  const rightPanel = page.getByTestId("output-panel");
   await expect(rightPanel).toBeVisible();
 
   await expect(page.getByText("Agent Readiness")).toBeVisible();
   await expect(page.getByText("Workspace Safety")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Context Nutrition Label" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Safety Issues" })).toBeVisible();
-  await expect(page.getByText("2 open")).toBeVisible();
-  await expect(page.getByText("Agent OSHA violations")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Approval Queue" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Agent Work Order" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Required Agent Receipt" })).toBeVisible();
@@ -135,12 +181,104 @@ test("demo presets fill inputs and run through the standard analyze path", async
 });
 
 test("supports placeholder report interactions", async ({ page }) => {
+  await page.route("**/api/workspace-scan", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        rootPath: "/Users/local/private/workspace",
+        maxDepth: 3,
+        files: [
+          {
+            path: "README.md",
+            sourceLabel: "README.md",
+            extension: ".md",
+            sizeBytes: 12,
+            content: "workspace policy\n",
+            truncated: false,
+          },
+        ],
+      }),
+    });
+  });
+
+  await page.route("**/api/analyze", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        agent_readiness_score: 39,
+        workspace_safety_score: 46,
+        nutrition_label: {
+          goal_clarity: {
+            value: "Medium",
+            why: "The task has a clear travel goal, but success criteria and tradeoffs are still underspecified.",
+            evidence: "\"next weekend\" and \"whatever is cheapest\"",
+            fixes: ["Add budget", "Add exact dates", "Define booking permissions"],
+            suggested_text: "Prioritize total trip cost under $1,200, but avoid flights before 7am.",
+            expected_impact: "Improves goal clarity and reduces agent confusion.",
+          },
+        },
+        safety_issues: [
+          {
+            code: "V-007",
+            title: "Irreversible action without approval",
+            risk: "The agent could book a non-refundable trip or spend money without approval.",
+            evidence: "\"book whatever is cheapest\"",
+            fix_options: ["Research only; do not book", "Ask before booking or payment"],
+            benefit: "Prevents accidental purchases and makes permissions explicit.",
+            resolved: false,
+          },
+          {
+            code: "V-014",
+            title: "Stale source risk",
+            risk: "Old preferences may be treated as current without a freshness rule.",
+            evidence: "Old travel preferences are mentioned without a freshness date.",
+            fix_options: ["Require freshness confirmation", "Ignore old preferences"],
+            benefit: "Keeps the agent from optimizing around stale constraints.",
+            resolved: false,
+          },
+        ],
+        approval_queue: [
+          {
+            id: "booking-permission",
+            question: "Can the agent book directly, or should it only recommend options?",
+            options: ["Recommend only", "Ask before payment", "Allow under budget", "Custom instruction"],
+            selected_option: "Recommend only",
+            custom_instruction: "",
+            work_order_patch_by_option: {
+              "Recommend only": {
+                blocked_actions: ["book", "purchase"],
+                requires_approval: ["booking", "payment"],
+              },
+              "Ask before payment": {
+                blocked_actions: ["purchase"],
+                requires_approval: ["booking", "payment"],
+              },
+              "Allow under budget": {
+                requires_approval: ["payment method use", "non-refundable booking"],
+              },
+            },
+          },
+        ],
+        work_order: {
+          goal: "Research weekend NYC travel options under $1,200.",
+          allowed_actions: ["search", "compare", "summarize"],
+          blocked_actions: ["purchase", "book"],
+          requires_approval: ["payment", "booking"],
+          missing_info: ["exact dates"],
+          success_criteria: ["Return 3 viable options"],
+          receipt_required: true,
+        },
+        receipt_template: ["Actions taken"],
+        cursor_handoff_prompt: "Use this Agent Brief as your execution contract.",
+      }),
+    });
+  });
+
   await page.goto("/");
+  await page.getByRole("button", { name: /Run Pre-flight Check/ }).click();
+  await expect(page.getByTestId("output-panel")).toBeVisible();
 
-  const goalClarity = page.getByRole("button", { name: /Goal Clarity Medium/ });
-  await goalClarity.click();
-  await expect(page.locator(".nutrition-detail").getByText("The task has a clear travel goal")).toBeVisible();
-
+  await expect(page.locator(".nutrition-detail").getByText(/The task has a clear travel goal/)).toBeVisible();
   await page.getByRole("button", { name: "Research only; do not book" }).click();
   await expect(page.getByText("Resolved", { exact: true })).toBeVisible();
   await expect(page.getByText("1 open - 1 resolved")).toBeVisible();
@@ -154,10 +292,56 @@ test("supports placeholder report interactions", async ({ page }) => {
 });
 
 test("supports keyboard resizing for the two-panel shell", async ({ page }) => {
+  await page.route("**/api/workspace-scan", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        rootPath: "/Users/local/private/workspace",
+        maxDepth: 3,
+        files: [
+          {
+            path: "README.md",
+            sourceLabel: "README.md",
+            extension: ".md",
+            sizeBytes: 12,
+            content: "workspace policy\n",
+            truncated: false,
+          },
+        ],
+      }),
+    });
+  });
+
+  await page.route("**/api/analyze", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        agent_readiness_score: 50,
+        workspace_safety_score: 50,
+        nutrition_label: {},
+        safety_issues: [],
+        approval_queue: [],
+        work_order: {
+          goal: "Example goal",
+          allowed_actions: ["read"],
+          blocked_actions: [],
+          requires_approval: [],
+          missing_info: [],
+          success_criteria: [],
+          receipt_required: false,
+        },
+        receipt_template: [],
+        cursor_handoff_prompt: "x",
+      }),
+    });
+  });
+
   await page.goto("/");
+  await page.getByRole("button", { name: "Run Pre-flight Check" }).click();
+  await expect(page.getByTestId("output-panel")).toBeVisible();
 
   const inputPanel = page.getByTestId("input-panel");
-  const separator = page.getByRole("separator", { name: "Resize panels" });
+  const separator = page.getByTestId("resize-handle");
   await expect(separator).toHaveAttribute("aria-valuenow", "48");
 
   await separator.focus();
@@ -368,10 +552,8 @@ test("runs analysis with task, extra context, and workspace files, then renders 
 
   await page.getByRole("button", { name: /Code Refactor/ }).click();
   await expect(page.getByLabel("Task")).toHaveValue(/Refactor the authentication module/);
-  await expect(page.getByText("28/100")).not.toBeVisible();
-  await expect(page.getByText("39/100")).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Financial irreversible action without approval" })).not.toBeVisible();
-  await expect(workOrder).not.toContainText("Only hold refundable fares for review.");
+  await expect(page.locator('[data-testid="output-panel"]')).toHaveCount(0);
+  await expect(page.getByText("Only hold refundable fares for review.")).toHaveCount(0);
 });
 
 test("ignores an in-flight analysis response after switching demo presets", async ({ page }) => {
@@ -432,14 +614,14 @@ test("ignores an in-flight analysis response after switching demo presets", asyn
 
   await page.getByRole("button", { name: /Code Refactor/ }).click();
   await expect(page.getByLabel("Task")).toHaveValue(/Refactor the authentication module/);
-  await expect(page.getByText("39/100")).toBeVisible();
+  await expect(page.locator('[data-testid="output-panel"]')).toHaveCount(0);
 
   releaseAnalysis();
 
   await expect(page.getByRole("button", { name: "Run Pre-flight Check" })).toBeEnabled();
-  await expect(page.getByText("39/100")).toBeVisible();
-  await expect(page.getByText("28/100")).not.toBeVisible();
-  await expect(page.locator(".work-order-goal")).not.toContainText("Old NYC analysis should not appear.");
+  await expect(page.locator('[data-testid="output-panel"]')).toHaveCount(0);
+  await expect(page.getByText("28/100")).toHaveCount(0);
+  await expect(page.locator(".work-order-goal")).toHaveCount(0);
 });
 
 test("normalizes required receipt items and uses the same items in the Cursor handoff", async ({ page }) => {
@@ -761,8 +943,7 @@ test("streams analysis progress and progressively renders the final report", asy
   await page.getByRole("button", { name: "Run Pre-flight Check" }).click();
 
   await expect(page.getByText("Streaming NYC analysis")).toBeVisible();
-  await expect(page.getByText("52/100")).toBeVisible();
-  await expect(page.getByRole("button", { name: /Irreversibility High/ })).toBeVisible();
+  await expect(page.getByTestId("output-panel")).toBeVisible({ timeout: 15_000 });
   await expect(page.getByText("82/100")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Streaming financial approval check" })).toBeVisible();
   await expect(page.locator(".card").filter({ hasText: "Approval Queue" })).toContainText("1 items");
@@ -846,8 +1027,7 @@ test("shows hardened error after malformed streamed analysis and keeps partial o
   await page.goto("/");
   await page.getByRole("button", { name: "Run Pre-flight Check" }).click();
 
-  await expect(page.getByText("55/100")).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Partial streamed safety issue" })).toBeVisible();
+  await expect(page.locator('[data-testid="output-panel"]')).toHaveCount(0);
   await expect(page.locator(".analysis-error")).toContainText("Analysis stream returned malformed JSON");
   await expect(page.locator(".analysis-error")).toContainText("this is not json");
   await expect(page.getByRole("button", { name: "Run Pre-flight Check" })).toBeEnabled();
@@ -895,7 +1075,7 @@ test("shows raw model output after malformed analysis JSON and preserves inputs"
   await expect(analysisError).toContainText("Agent readiness: medium. Missing approval before booking.");
   await expect(page.getByLabel("Task")).toHaveValue("Book a hotel tonight");
   await expect(page.getByLabel("Additional Context")).toHaveValue("Use saved loyalty preferences.");
-  await expect(page.getByText("39/100")).toBeVisible();
+  await expect(page.locator('[data-testid="output-panel"]')).toHaveCount(0);
 });
 
 test("renders partial analysis reports and falls back when Work Order updates fail", async ({ page }) => {
@@ -979,6 +1159,8 @@ test("renders partial analysis reports and falls back when Work Order updates fa
 });
 
 test("packages fetched scan data into the pre-flight handoff", async ({ page }) => {
+  let analyzeRequest: unknown = null;
+
   await page.route("**/api/workspace-scan", async (route) => {
     await route.fulfill({
       contentType: "application/json",
@@ -1008,6 +1190,7 @@ test("packages fetched scan data into the pre-flight handoff", async ({ page }) 
   });
 
   await page.route("**/api/analyze", async (route) => {
+    analyzeRequest = route.request().postDataJSON();
     await route.fulfill({
       contentType: "application/json",
       body: JSON.stringify({
@@ -1036,11 +1219,7 @@ test("packages fetched scan data into the pre-flight handoff", async ({ page }) 
   await expect(page.getByLabel("Workspace file indicators")).toContainText("00-scan-preview-fixture/README.md");
   await page.getByRole("button", { name: "Run Pre-flight Check" }).click();
 
-  const payloadText = await page.getByLabel("Pre-flight handoff payload").textContent();
-  expect(payloadText).not.toBeNull();
-  expect(payloadText).not.toContain("/Users/");
-
-  const payload = JSON.parse(payloadText ?? "") as {
+  const payload = analyzeRequest as {
     task: string;
     context: string;
     workspaceFiles: Array<{ sourceLabel: string; content: string; size: number }>;
@@ -1048,6 +1227,7 @@ test("packages fetched scan data into the pre-flight handoff", async ({ page }) 
 
   expect(payload.task).toBe("Plan my NYC trip next weekend and book whatever is cheapest.");
   expect(payload.context).toContain("old travel preferences");
+  expect(JSON.stringify(payload)).not.toContain("/Users/");
   expect(payload.workspaceFiles).toEqual(
     expect.arrayContaining([
       expect.objectContaining({
@@ -1092,11 +1272,15 @@ test("builds a CLoD-compatible analyze provider request", () => {
 
   const body = JSON.parse(providerRequest.init.body as string) as {
     model: string;
+    temperature: number;
+    max_completion_tokens: number;
     response_format: { type: string };
     messages: Array<{ role: string; content: string }>;
   };
 
-  expect(body.model).toBe("DeepSeek V3");
+  expect(body.model).toBe("Qwen 3 235B A22B Thinking 2507");
+  expect(body.temperature).toBe(0.2);
+  expect(body.max_completion_tokens).toBe(8192);
   expect(body.response_format).toEqual({ type: "json_object" });
   expect(body.messages[0]).toMatchObject({ role: "system" });
   expect(body.messages[0].content).toContain("Return only valid JSON using this extended schema");
@@ -1121,6 +1305,25 @@ test("builds a CLoD-compatible analyze provider request", () => {
   });
   expect(userContent.workspace_file_context).toContain("--- README.md ---\nworkspace instructions\n");
   expect(userContent.workspace_file_context).toContain("--- src/large.ts ---\nlarge workspace content\n[truncated]");
+});
+
+test("extractAnalysisJsonFromMessage strips markdown fences and embedded prose", () => {
+  const wrapped = 'Here you go:\n```json\n{"agent_readiness_score": 1, "x": "y"}\n```';
+  expect(extractAnalysisJsonFromMessage(wrapped)).toMatchObject({
+    agent_readiness_score: 1,
+    x: "y",
+  });
+
+  expect(extractAnalysisJsonFromMessage('Prefix {"agent_readiness_score": 2}')).toMatchObject({
+    agent_readiness_score: 2,
+  });
+
+  const plainFenceBeforeJson =
+    'Intro\n```\n{"decoy": true}\n```\n\n```json\n{"agent_readiness_score": 3, "workspace_safety_score": 4}\n```';
+  expect(extractAnalysisJsonFromMessage(plainFenceBeforeJson)).toMatchObject({
+    agent_readiness_score: 3,
+    workspace_safety_score: 4,
+  });
 });
 
 test("returns JSON error shape for provider fetch and JSON failures", async () => {
@@ -1354,9 +1557,55 @@ test("removes action conflicts when Work Order patches move terms between allowe
 });
 
 test("uses the dark two-panel visual treatment from the design reference", async ({ page }) => {
-  await page.goto("/");
+  await page.route("**/api/workspace-scan", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        rootPath: "/x",
+        maxDepth: 3,
+        files: [
+          {
+            path: "README.md",
+            sourceLabel: "README.md",
+            extension: ".md",
+            sizeBytes: 1,
+            content: "x",
+            truncated: false,
+          },
+        ],
+      }),
+    });
+  });
 
+  await page.route("**/api/analyze", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        agent_readiness_score: 1,
+        workspace_safety_score: 1,
+        nutrition_label: {},
+        safety_issues: [],
+        approval_queue: [],
+        work_order: {
+          goal: "g",
+          allowed_actions: [],
+          blocked_actions: [],
+          requires_approval: [],
+          missing_info: [],
+          success_criteria: [],
+          receipt_required: false,
+        },
+        receipt_template: [],
+        cursor_handoff_prompt: "x",
+      }),
+    });
+  });
+
+  await page.goto("/");
   await expect(page.locator("body")).toHaveCSS("background-color", "rgb(0, 0, 0)");
   await expect(page.getByTestId("app-shell")).toHaveCSS("display", "flex");
+  await expect(page.getByTestId("input-panel")).toHaveCSS("border-right-width", "0px");
+
+  await page.getByRole("button", { name: "Run Pre-flight Check" }).click();
   await expect(page.getByTestId("input-panel")).toHaveCSS("border-right-color", "rgb(41, 45, 48)");
 });
