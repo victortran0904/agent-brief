@@ -231,6 +231,7 @@ export default function Home() {
   const [scanError, setScanError] = useState("");
   const [report, setReport] = useState<AnalysisReport>(defaultReport);
   const [analysisError, setAnalysisError] = useState("");
+  const [analysisStatus, setAnalysisStatus] = useState("");
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [lastAnalyzePayload, setLastAnalyzePayload] = useState<PreflightRequest | null>(null);
   const [safetyResolutions, setSafetyResolutions] = useState<Record<string, string>>({});
@@ -314,11 +315,13 @@ export default function Home() {
     setLastAnalyzePayload(payload);
     setIsAnalyzing(true);
     setAnalysisError("");
+    setAnalysisStatus("Starting analysis...");
 
     try {
       const response = await fetch("/api/analyze", {
         method: "POST",
         headers: {
+          Accept: "application/x-ndjson, application/json",
           "Content-Type": "application/json",
         },
         body: JSON.stringify(payload),
@@ -329,16 +332,24 @@ export default function Home() {
         return;
       }
 
-      const nextReport = normalizeReport((await response.json()) as Partial<AnalysisReport>);
+      const nextReport = await readAnalysisResponse(response, (chunk) => {
+        if (chunk.type === "progress") {
+          setAnalysisStatus(chunk.message ?? "Streaming analysis results...");
+          return;
+        }
+
+        setReport(normalizeReport(chunk.report));
+      });
 
       setReport(nextReport);
       setOpenNutrition(Object.keys(nextReport.nutrition_label)[0] ?? "");
       setSafetyResolutions({});
       setApprovalSelections({});
       setCustomInstructions({});
-    } catch {
-      setAnalysisError("Analysis failed. Check CLOD_API_KEY and try again.");
+    } catch (error) {
+      setAnalysisError(error instanceof Error ? error.message : "Analysis failed. Check CLOD_API_KEY and try again.");
     } finally {
+      setAnalysisStatus("");
       setIsAnalyzing(false);
     }
   }
@@ -440,6 +451,11 @@ export default function Home() {
           <button className="run-button" disabled={!workspaceScan || isAnalyzing} onClick={runPreflightCheck} type="button">
             {isAnalyzing ? "Analyzing..." : "Run Pre-flight Check"}
           </button>
+          {analysisStatus ? (
+            <p className="analysis-status" role="status">
+              {analysisStatus}
+            </p>
+          ) : null}
           {analysisError ? (
             <p className="analysis-error" role="alert">
               {analysisError}
@@ -661,6 +677,25 @@ type AnalysisFailure = {
   raw?: string;
 };
 
+type AnalysisStreamChunk =
+  | {
+      type: "progress";
+      message?: string;
+    }
+  | {
+      type: "section";
+      report?: Partial<AnalysisReport>;
+    }
+  | {
+      type: "complete";
+      report?: Partial<AnalysisReport>;
+    }
+  | {
+      type: "error";
+      error?: string;
+      raw?: string;
+    };
+
 type WorkOrderState = {
   workOrder: WorkOrder;
   error: string;
@@ -679,6 +714,118 @@ async function formatAnalysisFailure(response: Response) {
   } catch {
     return "Analysis failed. Check CLOD_API_KEY and try again.";
   }
+}
+
+async function readAnalysisResponse(response: Response, onChunk: (chunk: AnalysisStreamChunk & { report: Partial<AnalysisReport> }) => void) {
+  const contentType = response.headers.get("Content-Type") ?? "";
+
+  if (!contentType.includes("application/x-ndjson")) {
+    return normalizeReport((await response.json()) as Partial<AnalysisReport>);
+  }
+
+  if (!response.body) {
+    throw new Error("Analysis stream was empty");
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let streamedReport: Partial<AnalysisReport> = {};
+  let completedReport: AnalysisReport | null = null;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
+
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+
+    for (const line of lines) {
+      const chunk = parseAnalysisStreamChunk(line);
+
+      if (chunk.type === "error") {
+        throw new Error(formatStreamFailure(chunk));
+      }
+
+      if (chunk.type === "progress") {
+        onChunk({ ...chunk, report: streamedReport });
+        continue;
+      }
+
+      streamedReport = mergeReportPatch(streamedReport, chunk.report ?? {});
+      onChunk({ ...chunk, report: streamedReport });
+
+      if (chunk.type === "complete") {
+        completedReport = normalizeReport(streamedReport);
+      }
+    }
+
+    if (done) {
+      break;
+    }
+  }
+
+  if (buffer.trim()) {
+    const chunk = parseAnalysisStreamChunk(buffer);
+
+    if (chunk.type === "error") {
+      throw new Error(formatStreamFailure(chunk));
+    }
+
+    if (chunk.type !== "progress") {
+      streamedReport = mergeReportPatch(streamedReport, chunk.report ?? {});
+      onChunk({ ...chunk, report: streamedReport });
+
+      if (chunk.type === "complete") {
+        completedReport = normalizeReport(streamedReport);
+      }
+    }
+  }
+
+  if (!completedReport) {
+    throw new Error("Analysis stream ended before the final report was received.");
+  }
+
+  return completedReport;
+}
+
+function parseAnalysisStreamChunk(line: string): AnalysisStreamChunk {
+  try {
+    const chunk = JSON.parse(line) as AnalysisStreamChunk;
+
+    if (chunk && typeof chunk === "object" && "type" in chunk) {
+      return chunk;
+    }
+  } catch {
+    // Fall through to the hardened stream error below.
+  }
+
+  return {
+    type: "error",
+    error: "Analysis stream returned malformed JSON",
+    raw: line,
+  };
+}
+
+function formatStreamFailure(chunk: Extract<AnalysisStreamChunk, { type: "error" }>) {
+  const message = chunk.error || "Analysis failed";
+
+  if (chunk.raw) {
+    return `${message}\n\nRaw model output:\n${chunk.raw}`;
+  }
+
+  return message;
+}
+
+function mergeReportPatch(current: Partial<AnalysisReport>, patch: Partial<AnalysisReport>) {
+  return {
+    ...current,
+    ...patch,
+    nutrition_label: {
+      ...(current.nutrition_label ?? {}),
+      ...(patch.nutrition_label ?? {}),
+    },
+  };
 }
 
 function normalizeReport(report: Partial<AnalysisReport>): AnalysisReport {

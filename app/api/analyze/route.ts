@@ -34,6 +34,20 @@ type ClodProviderPayload = {
   }>;
 };
 
+type AnalysisStreamChunk =
+  | {
+      type: "progress";
+      message: string;
+    }
+  | {
+      type: "section";
+      report: Record<string, unknown>;
+    }
+  | {
+      type: "complete";
+      report: Record<string, unknown>;
+    };
+
 export async function POST(request: Request) {
   const apiKey = process.env.CLOD_API_KEY;
 
@@ -90,11 +104,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    return NextResponse.json(JSON.parse(content), {
-      headers: {
-        "Cache-Control": "no-store",
-      },
-    });
+    return streamAnalysisReport(JSON.parse(content) as Record<string, unknown>);
   } catch {
     return NextResponse.json({ error: "CLoD response was not valid JSON", raw: content }, { status: 502 });
   }
@@ -227,4 +237,63 @@ Return only valid JSON using this extended schema:
 Use the user-facing label "Safety Issues" for the safety section and the subtitle concept "Agent OSHA violations".
 For travel, money, deletion, messaging, or other irreversible actions, warn clearly and require approval.
 For the canonical NYC travel task, include financial and irreversible-action warnings and a Cursor handoff prompt that explicitly forbids booking or purchasing without approval.`;
+}
+
+export function streamAnalysisReport(report: Record<string, unknown>) {
+  const encoder = new TextEncoder();
+
+  return new Response(
+    new ReadableStream({
+      async start(controller) {
+        for (const chunk of buildAnalysisStreamChunks(report)) {
+          controller.enqueue(encoder.encode(`${JSON.stringify(chunk)}\n`));
+          await delay(40);
+        }
+
+        controller.close();
+      },
+    }),
+    {
+      headers: {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/x-ndjson; charset=utf-8",
+        "X-Content-Type-Options": "nosniff",
+      },
+    },
+  );
+}
+
+export function buildAnalysisStreamChunks(report: Record<string, unknown>): AnalysisStreamChunk[] {
+  return [
+    { type: "progress", message: "Streaming analysis results..." },
+    {
+      type: "section",
+      report: pickReportFields(report, ["agent_readiness_score", "workspace_safety_score"]),
+    },
+    {
+      type: "section",
+      report: pickReportFields(report, ["nutrition_label"]),
+    },
+    {
+      type: "section",
+      report: pickReportFields(report, ["safety_issues"]),
+    },
+    {
+      type: "section",
+      report: pickReportFields(report, ["approval_queue"]),
+    },
+    {
+      type: "section",
+      report: pickReportFields(report, ["work_order", "receipt_template", "cursor_handoff_prompt"]),
+    },
+    { type: "complete", report },
+  ];
+}
+
+function pickReportFields(report: Record<string, unknown>, fields: string[]) {
+  return Object.fromEntries(fields.filter((field) => field in report).map((field) => [field, report[field]]));
+}
+
+function delay(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

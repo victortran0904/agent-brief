@@ -566,11 +566,20 @@ textarea:focus {
   margin-top: 10px;
 }
 
+.analysis-status,
+.analysis-error,
+.work-order-warning {
+  font-size: 12px;
+  margin: 10px 0 0;
+}
+
+.analysis-status {
+  color: var(--color-blue);
+}
+
 .analysis-error,
 .work-order-warning {
   color: var(--color-red);
-  font-size: 12px;
-  margin: 10px 0 0;
 }
 
 .custom-instruction {
