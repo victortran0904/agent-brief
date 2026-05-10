@@ -708,6 +708,142 @@
       vertical-align: middle;
     }
 
+    .status-badge {
+      display: inline-flex;
+      margin-left: 8px;
+      padding: 2px 6px;
+      border-radius: var(--radius-badge);
+      font-family: var(--font-mono);
+      font-size: 10px;
+      vertical-align: middle;
+    }
+
+    .status-badge.checking {
+      border: 1px solid rgba(255, 202, 22, 0.35);
+      color: var(--color-yellow);
+    }
+
+    .status-badge.follow-up {
+      border: 1px solid rgba(59, 158, 255, 0.35);
+      color: var(--color-blue);
+    }
+
+    .violation.has-follow-up .violation-code {
+      color: var(--color-blue);
+    }
+
+    .custom-instruction-card {
+      display: none;
+      margin-top: 12px;
+      padding: 14px;
+      border: 1px solid rgba(59, 158, 255, 0.22);
+      border-radius: 12px;
+      background: linear-gradient(180deg, rgba(59, 158, 255, 0.08), rgba(0, 0, 0, 0.22));
+    }
+
+    .custom-instruction-card.is-visible {
+      display: block;
+    }
+
+    .custom-question {
+      color: var(--color-frost);
+      font-size: 12px;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+
+    .suggestion-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-bottom: 10px;
+    }
+
+    .suggestion-chip {
+      padding: 4px 7px;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-badge);
+      background: rgba(255, 255, 255, 0.03);
+      color: var(--color-ash);
+      font-family: var(--font-sans);
+      font-size: 11px;
+    }
+
+    .custom-instruction-input {
+      width: 100%;
+      min-height: 72px;
+      resize: vertical;
+      padding: 10px;
+      border: 1px solid var(--color-border);
+      border-radius: 10px;
+      background: rgba(0, 0, 0, 0.35);
+      color: var(--color-frost);
+      font-family: var(--font-sans);
+      font-size: 12px;
+      line-height: 1.5;
+      outline: none;
+    }
+
+    .custom-instruction-input:focus {
+      border-color: rgba(59, 158, 255, 0.55);
+    }
+
+    .custom-actions {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-top: 10px;
+    }
+
+    .custom-helper {
+      color: var(--color-ash);
+      font-size: 11px;
+      line-height: 1.45;
+    }
+
+    .custom-submit {
+      padding: 7px 10px;
+      border: 1px solid rgba(59, 158, 255, 0.5);
+      border-radius: var(--radius-badge);
+      background: rgba(59, 158, 255, 0.12);
+      color: var(--color-white);
+      font-family: var(--font-sans);
+      font-size: 12px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      white-space: nowrap;
+    }
+
+    .custom-submit:hover {
+      border-color: var(--color-blue);
+      transform: translateY(-1px);
+    }
+
+    .custom-submit:active {
+      transform: translateY(0);
+    }
+
+    .nested-violation {
+      display: none;
+      margin-top: 12px;
+      margin-left: -2px;
+      padding: 12px;
+      border: 1px solid rgba(255, 149, 146, 0.22);
+      border-radius: 12px;
+      background: rgba(255, 149, 146, 0.05);
+    }
+
+    .nested-violation.is-visible {
+      display: grid;
+      grid-template-columns: 48px 1fr;
+      gap: 10px;
+    }
+
+    .nested-violation .violation-code {
+      min-width: auto;
+    }
+
     /* ── Approval Queue ── */
     .approval-item {
       display: flex;
@@ -1464,15 +1600,43 @@
               </div>
             </div>
           </div>
-          <div class="violation">
+          <div class="violation has-follow-up">
             <div class="violation-code">V-022</div>
             <div>
-              <div class="violation-title">Permission ambiguity</div>
+              <div class="violation-title">Permission ambiguity <span class="status-badge follow-up">Resolved with follow-up</span></div>
               <div class="violation-desc">Risk: broad Gmail and saved-card access could expose private data or enable payment without scope limits.</div>
               <div class="fix-options">
                 <button class="fix-option">Search Gmail only</button>
                 <button class="fix-option">Never use saved card</button>
                 <button class="fix-option">No vendor sharing</button>
+                <button class="fix-option selected" data-custom-trigger>Custom instruction</button>
+              </div>
+              <div class="custom-instruction-card is-visible">
+                <div class="custom-question">What constraint should the agent follow for this safety issue?</div>
+                <div class="suggestion-chips" aria-label="Suggested custom instruction starters">
+                  <button class="suggestion-chip" type="button">Do not...</button>
+                  <button class="suggestion-chip" type="button">Ask before...</button>
+                  <button class="suggestion-chip" type="button">Only use...</button>
+                  <button class="suggestion-chip" type="button">Limit to...</button>
+                </div>
+                <textarea class="custom-instruction-input">Search Gmail for receipts only. Do not open personal email threads or use saved cards.</textarea>
+                <div class="custom-actions">
+                  <div class="custom-helper">Custom instructions are patched into the Work Order, then checked again before Copy for Cursor.</div>
+                  <button class="custom-submit" type="button">Submit + re-check</button>
+                </div>
+              </div>
+              <div class="nested-violation is-visible">
+                <div class="violation-code">V-022A</div>
+                <div>
+                  <div class="violation-title">Sensitive inbox scope still ambiguous</div>
+                  <div class="violation-desc">Risk: "receipts only" does not define sender, date range, or whether the agent may open full email threads.</div>
+                  <div class="fix-options">
+                    <button class="fix-option">Last 90 days only</button>
+                    <button class="fix-option">Travel vendors only</button>
+                    <button class="fix-option">Ask before opening thread</button>
+                    <button class="fix-option">Custom instruction</button>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -1729,8 +1893,57 @@ Model: deepseek-v3 via api.clod.io</div>
         group.querySelectorAll('.fix-option').forEach(button => button.classList.remove('selected'));
         event.currentTarget.classList.add('selected');
 
+        if (event.currentTarget.closest('.nested-violation')) return;
+
         const issue = event.currentTarget.closest('.violation');
+        const customCard = issue ? issue.querySelector('.custom-instruction-card') : null;
+        const nestedIssue = issue ? issue.querySelector('.nested-violation') : null;
+
+        if (event.currentTarget.dataset.customTrigger !== undefined) {
+          if (customCard) customCard.classList.add('is-visible');
+          if (issue) issue.classList.remove('resolved');
+          return;
+        }
+
+        if (customCard) customCard.classList.remove('is-visible');
+        if (nestedIssue) nestedIssue.classList.remove('is-visible');
         if (issue) issue.classList.add('resolved');
+      });
+    });
+
+    document.querySelectorAll('.suggestion-chip').forEach(chip => {
+      chip.addEventListener('click', (event) => {
+        const card = event.currentTarget.closest('.custom-instruction-card');
+        const input = card ? card.querySelector('.custom-instruction-input') : null;
+
+        if (!input) return;
+
+        input.value = event.currentTarget.textContent + ' ';
+        input.focus();
+      });
+    });
+
+    document.querySelectorAll('.custom-submit').forEach(button => {
+      button.addEventListener('click', (event) => {
+        const issue = event.currentTarget.closest('.violation');
+        const status = issue ? issue.querySelector('.status-badge') : null;
+        const nestedIssue = issue ? issue.querySelector('.nested-violation') : null;
+
+        if (!issue || !status || !nestedIssue) return;
+
+        issue.classList.remove('resolved', 'has-follow-up');
+        nestedIssue.classList.remove('is-visible');
+        status.textContent = 'Checking...';
+        status.className = 'status-badge checking';
+        event.currentTarget.textContent = 'Checking...';
+
+        setTimeout(() => {
+          issue.classList.add('has-follow-up');
+          nestedIssue.classList.add('is-visible');
+          status.textContent = 'Resolved with follow-up';
+          status.className = 'status-badge follow-up';
+          event.currentTarget.textContent = 'Submit + re-check';
+        }, 900);
       });
     });
 
