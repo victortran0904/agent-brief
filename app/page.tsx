@@ -600,7 +600,11 @@ export default function Home() {
             {derivedWorkOrder.custom_instructions?.length ? (
               <WorkOrderText label="Custom" value={derivedWorkOrder.custom_instructions.join("; ")} />
             ) : null}
-            {workOrderState.error ? <p className="work-order-warning">{workOrderState.error}</p> : null}
+            {workOrderState.error ? (
+              <p className="work-order-warning" role="alert">
+                {workOrderState.error}
+              </p>
+            ) : null}
             <pre aria-label="Cursor handoff prompt" className="handoff-payload">
               {cursorHandoffPrompt}
             </pre>
@@ -936,11 +940,16 @@ function formatApprovalImpact(item: ApprovalQueueItem, selected: string) {
   let effects: string[];
 
   try {
+    const blockedActions = patchList(patch, "blocked_actions");
+    const requiresApproval = patchList(patch, "requires_approval");
+    const successCriteria = patchList(patch, "success_criteria");
+    const missingInfo = patchList(patch, "missing_info");
+
     effects = [
-      patchList(patch, "blocked_actions").length ? `blocks ${patchList(patch, "blocked_actions").join(", ")}` : "",
-      patchList(patch, "requires_approval").length ? `requires approval for ${patchList(patch, "requires_approval").join(", ")}` : "",
-      patchList(patch, "success_criteria").length ? `adds success criteria ${patchList(patch, "success_criteria").join(", ")}` : "",
-      patchList(patch, "missing_info").length ? `tracks missing info ${patchList(patch, "missing_info").join(", ")}` : "",
+      blockedActions.length ? `blocks ${blockedActions.join(", ")}` : "",
+      requiresApproval.length ? `requires approval for ${requiresApproval.join(", ")}` : "",
+      successCriteria.length ? `adds success criteria ${successCriteria.join(", ")}` : "",
+      missingInfo.length ? `tracks missing info ${missingInfo.join(", ")}` : "",
     ].filter(Boolean);
   } catch {
     return "Updates Work Order: unavailable because the patch data is incomplete.";
