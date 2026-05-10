@@ -1,7 +1,11 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { KeyboardEvent, MouseEvent } from "react";
+import type { ChangeEvent, KeyboardEvent, MouseEvent } from "react";
+
+/** Matches server-side workspace preview limit (`lib/workspace-scanner.ts`). */
+const WORKSPACE_FILE_MAX_BYTES = 200_000;
+const BINARY_SAMPLE_BYTES = 512;
 
 type WorkspaceScanFile = {
   path: string;
@@ -289,6 +293,87 @@ const defaultReport: AnalysisReport = {
     "Use this Agent Brief as your execution contract. Research travel options, do not book or purchase anything, ask for approval before irreversible actions, and return the required receipt.",
 };
 
+function mergeWorkspaceScanWithUploads(
+  scan: WorkspaceScanResult | null,
+  uploads: WorkspaceScanFile[],
+): WorkspaceScanResult | null {
+  if (!scan && uploads.length === 0) {
+    return null;
+  }
+
+  if (!scan) {
+    return {
+      rootPath: "demo-upload",
+      maxDepth: 0,
+      files: uploads,
+    };
+  }
+
+  const uploadPaths = new Set(uploads.map((file) => file.path));
+
+  return {
+    ...scan,
+    files: [...uploads, ...scan.files.filter((file) => !uploadPaths.has(file.path))],
+  };
+}
+
+function claimUniqueUploadPath(fileName: string, claimedPaths: Set<string>): string {
+  let candidate = `demo-upload/${fileName}`;
+  let suffix = 2;
+  const dot = fileName.lastIndexOf(".");
+  const stem = dot > 0 ? fileName.slice(0, dot) : fileName;
+  const ext = dot > 0 ? fileName.slice(dot) : "";
+
+  while (claimedPaths.has(candidate)) {
+    candidate = `demo-upload/${stem} (${suffix})${ext}`;
+    suffix += 1;
+  }
+
+  claimedPaths.add(candidate);
+  return candidate;
+}
+
+function isBinarySampleUint8(sample: Uint8Array): boolean {
+  const limit = Math.min(sample.length, BINARY_SAMPLE_BYTES);
+
+  for (let index = 0; index < limit; index += 1) {
+    if (sample[index] === 0) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+async function browserFileToWorkspaceFile(file: File, claimedPaths: Set<string>): Promise<WorkspaceScanFile | null> {
+  const buffer = new Uint8Array(await file.arrayBuffer());
+
+  if (!buffer.length) {
+    return null;
+  }
+
+  const head = buffer.subarray(0, Math.min(buffer.length, BINARY_SAMPLE_BYTES));
+
+  if (isBinarySampleUint8(head)) {
+    return null;
+  }
+
+  const truncated = buffer.byteLength > WORKSPACE_FILE_MAX_BYTES;
+  const slice = buffer.subarray(0, WORKSPACE_FILE_MAX_BYTES);
+  const text = new TextDecoder("utf-8", { fatal: false }).decode(slice);
+  const path = claimUniqueUploadPath(file.name, claimedPaths);
+  const extension = file.name.includes(".") ? file.name.slice(file.name.lastIndexOf(".")) : file.name;
+
+  return {
+    path,
+    sourceLabel: path,
+    extension,
+    sizeBytes: buffer.byteLength,
+    content: text,
+    truncated,
+  };
+}
+
 export default function Home() {
   const [selectedPresetId, setSelectedPresetId] = useState(demoPresets[0].id);
   const [task, setTask] = useState(demoPresets[0].task);
@@ -299,7 +384,10 @@ export default function Home() {
   const [leftWidth, setLeftWidth] = useState(48);
   const [showReportPanel, setShowReportPanel] = useState(false);
   const [workspaceScan, setWorkspaceScan] = useState<WorkspaceScanResult | null>(null);
+  const [uploadedWorkspaceFiles, setUploadedWorkspaceFiles] = useState<WorkspaceScanFile[]>([]);
+  const [uploadError, setUploadError] = useState("");
   const [scanError, setScanError] = useState("");
+  const workspaceFileInputRef = useRef<HTMLInputElement>(null);
   const [report, setReport] = useState<AnalysisReport>(defaultReport);
   const [analysisError, setAnalysisError] = useState("");
   const [analysisStatus, setAnalysisStatus] = useState("");
@@ -313,8 +401,13 @@ export default function Home() {
 
   const copyLabel = copyState === "cursor" ? "Copied for Cursor" : "Copy for Cursor";
   const copyJsonLabel = copyState === "json" ? "JSON Copied" : "Copy JSON";
-  const indexedFiles = workspaceScan?.files ?? [];
+  const mergedWorkspaceScan = useMemo(
+    () => mergeWorkspaceScanWithUploads(workspaceScan, uploadedWorkspaceFiles),
+    [uploadedWorkspaceFiles, workspaceScan],
+  );
+  const indexedFiles = mergedWorkspaceScan?.files ?? [];
   const representativeFiles = indexedFiles.slice(0, 8);
+  const canRunPreflight = Boolean(mergedWorkspaceScan) && !isAnalyzing;
   const nutritionRows = useMemo(() => toNutritionRows(report.nutrition_label), [report.nutrition_label]);
   const workOrderState = useMemo(
     () => deriveWorkOrderState(report, safetyResolutions, approvalSelections, customInstructions),
@@ -407,13 +500,48 @@ export default function Home() {
     };
   }, []);
 
+  async function handleWorkspaceFileUpload(event: ChangeEvent<HTMLInputElement>) {
+    const list = event.target.files;
+
+    event.target.value = "";
+
+    if (!list?.length) {
+      return;
+    }
+
+    const pathClaims = new Set(uploadedWorkspaceFiles.map((file) => file.path));
+    const added: WorkspaceScanFile[] = [];
+    const errors: string[] = [];
+
+    for (const file of Array.from(list)) {
+      const converted = await browserFileToWorkspaceFile(file, pathClaims);
+
+      if (!converted) {
+        errors.push(`${file.name} skipped (binary or empty)`);
+        continue;
+      }
+
+      added.push(converted);
+    }
+
+    if (added.length) {
+      setUploadedWorkspaceFiles((current) => [...current, ...added]);
+    }
+
+    setUploadError(errors.length ? errors.join(" ") : "");
+  }
+
+  function removeUploadedWorkspaceFile(path: string) {
+    setUploadedWorkspaceFiles((current) => current.filter((file) => file.path !== path));
+  }
+
   function flashCopy(kind: "cursor" | "json") {
     setCopyState(kind);
     window.setTimeout(() => setCopyState("idle"), 1200);
   }
 
   async function runPreflightCheck() {
-    if (!workspaceScan || isAnalyzing) {
+    if (!mergedWorkspaceScan || isAnalyzing) {
       return;
     }
 
@@ -423,7 +551,7 @@ export default function Home() {
     const payload = {
       task,
       context,
-      workspaceFiles: packageWorkspaceScan(workspaceScan).files,
+      workspaceFiles: packageWorkspaceScan(mergedWorkspaceScan).files,
     };
 
     setShowReportPanel(false);
@@ -533,7 +661,7 @@ export default function Home() {
         <div className="scan-status" aria-label="Workspace scan status">
           <span className="status-dot" />
           <span>
-            <strong>{scanError ? "0" : indexedFiles.length}</strong> files indexed
+            <strong>{indexedFiles.length}</strong> files indexed
           </span>
         </div>
       </nav>
@@ -605,21 +733,61 @@ export default function Home() {
 
           <div className="field">
             <div className="field-label">Workspace Files</div>
-            <p>{scanError || `Local scan preview from safe text, config, and documentation sources.`}</p>
+            <p>
+              {scanError
+                ? `${scanError}. Add files below to supply demo context, or fix the project scan.`
+                : "Local scan preview from safe text, config, and documentation sources. Add your own files for demo-specific context."}
+            </p>
+            <div className="workspace-files-actions">
+              <input
+                accept=".md,.txt,.json,.yaml,.yml,.toml,.csv,.doc,.env,.example"
+                aria-label="Add workspace files from your computer"
+                className="workspace-files-input"
+                multiple
+                onChange={handleWorkspaceFileUpload}
+                ref={workspaceFileInputRef}
+                type="file"
+              />
+              <button
+                className="workspace-files-add"
+                onClick={() => workspaceFileInputRef.current?.click()}
+                type="button"
+              >
+                Add files…
+              </button>
+            </div>
+            {uploadError ? (
+              <p className="workspace-upload-error" role="status">
+                {uploadError}
+              </p>
+            ) : null}
             <div className="file-chips" aria-label="Workspace file indicators">
               {representativeFiles.length > 0 ? (
-                representativeFiles.map((file) => (
-                  <span className="file-chip" key={file.path} title={`${file.sizeBytes} bytes`}>
-                    {file.sourceLabel}
-                  </span>
-                ))
+                representativeFiles.map((file) => {
+                  const isUpload = file.path.startsWith("demo-upload/");
+                  return (
+                    <span className={`file-chip${isUpload ? " file-chip--upload" : ""}`} key={file.path} title={`${file.sizeBytes} bytes`}>
+                      {file.sourceLabel}
+                      {isUpload ? (
+                        <button
+                          aria-label={`Remove ${file.sourceLabel}`}
+                          className="file-chip-remove"
+                          onClick={() => removeUploadedWorkspaceFile(file.path)}
+                          type="button"
+                        >
+                          ×
+                        </button>
+                      ) : null}
+                    </span>
+                  );
+                })
               ) : (
                 <span className="file-chip">{scanError || "Scanning workspace..."}</span>
               )}
             </div>
           </div>
 
-          <button className="run-button" disabled={!workspaceScan || isAnalyzing} onClick={runPreflightCheck} type="button">
+          <button className="run-button" disabled={!canRunPreflight} onClick={runPreflightCheck} type="button">
             {isAnalyzing ? "Analyzing..." : "Run Pre-flight Check"}
           </button>
           {isAnalyzing ? (
@@ -686,16 +854,18 @@ export default function Home() {
                       onClick={() => setOpenNutrition(isOpen ? "" : row.id)}
                       type="button"
                     >
-                      <span>{row.label}</span>
-                      <span className={`risk risk-${row.risk}`}>{row.value}</span>
+                      <span className="nutrition-trigger-label">{row.label}</span>
+                      <span className={`nutrition-risk risk risk-${row.risk}`}>{row.value}</span>
                     </button>
                     {isOpen ? (
                       <div className="nutrition-detail">
-                        <DetailRow label="Why" text={row.entry.why} />
-                        <DetailRow label="Evidence" text={row.entry.evidence} />
-                        <FixList fixes={row.entry.fixes} />
-                        <DetailRow label="Suggested text" text={row.entry.suggested_text} />
-                        <DetailRow label="Expected impact" text={row.entry.expected_impact} />
+                        <div className="nutrition-detail-inner">
+                          <DetailRow label="Why" text={row.entry.why} />
+                          <DetailRow label="Evidence" text={row.entry.evidence} />
+                          <FixList fixes={row.entry.fixes} />
+                          <DetailRow label="Suggested text" text={row.entry.suggested_text} />
+                          <DetailRow label="Expected impact" text={row.entry.expected_impact} />
+                        </div>
                       </div>
                     ) : null}
                   </div>
