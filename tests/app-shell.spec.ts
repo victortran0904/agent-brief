@@ -296,6 +296,253 @@ test("runs analysis with task, extra context, and workspace files, then renders 
   await expect(page.getByLabel("Cursor handoff prompt")).toContainText("Do not book or purchase anything without explicit approval.");
 });
 
+test("streams analysis progress and progressively renders the final report", async ({ page }) => {
+  await page.route("**/api/workspace-scan", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        rootPath: "/Users/local/private/workspace",
+        maxDepth: 3,
+        files: [
+          {
+            path: "README.md",
+            sourceLabel: "README.md",
+            extension: ".md",
+            sizeBytes: 12,
+            content: "workspace travel policy: never book without approval\n",
+            truncated: false,
+          },
+        ],
+      }),
+    });
+  });
+
+  await page.addInitScript(() => {
+    const originalFetch = window.fetch.bind(window);
+
+    window.fetch = async (input, init) => {
+      const url = typeof input === "string" ? input : input instanceof Request ? input.url : input.toString();
+
+      if (!url.endsWith("/api/analyze")) {
+        return originalFetch(input, init);
+      }
+
+      const encoder = new TextEncoder();
+      const chunks = [
+        {
+          type: "progress",
+          message: "Streaming NYC analysis",
+        },
+        {
+          type: "section",
+          report: {
+            agent_readiness_score: 52,
+            workspace_safety_score: 48,
+            nutrition_label: {
+              irreversibility: {
+                value: "High",
+                why: "The task asks the agent to book whatever is cheapest.",
+                evidence: "book whatever is cheapest",
+                fixes: ["Require approval before booking or purchasing"],
+                suggested_text: "Do not book or purchase anything without explicit approval.",
+                expected_impact: "Prevents accidental charges.",
+              },
+            },
+          },
+        },
+        {
+          type: "complete",
+          report: {
+            agent_readiness_score: 82,
+            workspace_safety_score: 76,
+            nutrition_label: {
+              irreversibility: {
+                value: "High",
+                why: "The task asks the agent to book whatever is cheapest.",
+                evidence: "book whatever is cheapest",
+                fixes: ["Require approval before booking or purchasing"],
+                suggested_text: "Do not book or purchase anything without explicit approval.",
+                expected_impact: "Prevents accidental charges.",
+              },
+              approval_clarity: {
+                value: "Medium",
+                why: "The workspace policy blocks booking without approval.",
+                evidence: "workspace travel policy",
+                fixes: ["Ask before payment"],
+                suggested_text: "Research only until the user approves a specific booking.",
+                expected_impact: "Keeps the handoff actionable without allowing purchases.",
+              },
+            },
+            safety_issues: [
+              {
+                code: "V-STREAM",
+                title: "Streaming financial approval check",
+                risk: "The agent could purchase travel without approval.",
+                evidence: "book whatever is cheapest",
+                fix_options: ["Research only; do not book"],
+                benefit: "Prevents accidental purchases.",
+                resolved: false,
+                work_order_patch: {
+                  blocked_actions: ["book", "purchase"],
+                  requires_approval: ["booking", "payment"],
+                },
+              },
+            ],
+            approval_queue: [
+              {
+                id: "stream-booking-permission",
+                question: "Can the agent book directly?",
+                options: ["Recommend only", "Custom instruction"],
+                selected_option: "Recommend only",
+                custom_instruction: "",
+                work_order_patch_by_option: {
+                  "Recommend only": {
+                    blocked_actions: ["book", "purchase"],
+                  },
+                },
+              },
+            ],
+            work_order: {
+              goal: "Research NYC travel options while streaming the Agent Brief.",
+              allowed_actions: ["search", "compare", "summarize"],
+              blocked_actions: ["book", "purchase"],
+              requires_approval: ["booking", "payment"],
+              missing_info: ["exact dates"],
+              success_criteria: ["Return options before any irreversible action"],
+              receipt_required: true,
+            },
+            receipt_template: ["Actions taken", "Approvals requested", "Money spent"],
+            cursor_handoff_prompt:
+              "Use this Agent Brief as your execution contract. Research NYC travel only. Do not book or purchase anything without explicit approval.",
+          },
+        },
+      ];
+
+      return new Response(
+        new ReadableStream({
+          start(controller) {
+            chunks.forEach((chunk, index) => {
+              window.setTimeout(() => {
+                if (index === 1) {
+                  controller.enqueue(encoder.encode("\n"));
+                }
+
+                controller.enqueue(encoder.encode(`${JSON.stringify(chunk)}\n`));
+
+                if (index === chunks.length - 1) {
+                  controller.close();
+                }
+              }, index * 100);
+            });
+          },
+        }),
+        {
+          status: 200,
+          headers: {
+            "Content-Type": "application/x-ndjson",
+          },
+        },
+      );
+    };
+  });
+
+  await page.goto("/");
+  await expect(page.getByLabel("Workspace file indicators")).toContainText("README.md");
+  await page.getByRole("button", { name: "Run Pre-flight Check" }).click();
+
+  await expect(page.getByText("Streaming NYC analysis")).toBeVisible();
+  await expect(page.getByText("52/100")).toBeVisible();
+  await expect(page.getByRole("button", { name: /Irreversibility High/ })).toBeVisible();
+  await expect(page.getByText("82/100")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Streaming financial approval check" })).toBeVisible();
+  await expect(page.locator(".card").filter({ hasText: "Approval Queue" })).toContainText("1 items");
+  await expect(page.locator(".work-order-goal")).toContainText("Research NYC travel options while streaming the Agent Brief.");
+  await expect(page.getByLabel("Cursor handoff prompt")).toContainText("Do not book or purchase anything without explicit approval.");
+  await expect(page.getByRole("button", { name: "Run Pre-flight Check" })).toBeEnabled();
+});
+
+test("shows hardened error after malformed streamed analysis and keeps partial output stable", async ({ page }) => {
+  await page.route("**/api/workspace-scan", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        rootPath: "/Users/local/private/workspace",
+        maxDepth: 3,
+        files: [
+          {
+            path: "README.md",
+            sourceLabel: "README.md",
+            extension: ".md",
+            sizeBytes: 12,
+            content: "workspace travel policy: never book without approval\n",
+            truncated: false,
+          },
+        ],
+      }),
+    });
+  });
+
+  await page.addInitScript(() => {
+    const originalFetch = window.fetch.bind(window);
+
+    window.fetch = async (input, init) => {
+      const url = typeof input === "string" ? input : input instanceof Request ? input.url : input.toString();
+
+      if (!url.endsWith("/api/analyze")) {
+        return originalFetch(input, init);
+      }
+
+      const encoder = new TextEncoder();
+
+      return new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(
+              encoder.encode(
+                `${JSON.stringify({
+                  type: "section",
+                  report: {
+                    agent_readiness_score: 55,
+                    workspace_safety_score: 44,
+                    safety_issues: [
+                      {
+                        code: "V-PARTIAL-STREAM",
+                        title: "Partial streamed safety issue",
+                        risk: "The stream may fail after a partial report.",
+                        evidence: "interrupted stream",
+                        fix_options: ["Retry analysis"],
+                        benefit: "Keeps the UI recoverable.",
+                        resolved: false,
+                      },
+                    ],
+                  },
+                })}\n`,
+              ),
+            );
+            controller.enqueue(encoder.encode("this is not json\n"));
+            controller.close();
+          },
+        }),
+        {
+          status: 200,
+          headers: {
+            "Content-Type": "application/x-ndjson",
+          },
+        },
+      );
+    };
+  });
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "Run Pre-flight Check" }).click();
+
+  await expect(page.getByText("55/100")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Partial streamed safety issue" })).toBeVisible();
+  await expect(page.locator(".analysis-error")).toContainText("Analysis stream returned malformed JSON");
+  await expect(page.locator(".analysis-error")).toContainText("this is not json");
+  await expect(page.getByRole("button", { name: "Run Pre-flight Check" })).toBeEnabled();
+});
+
 test("shows raw model output after malformed analysis JSON and preserves inputs", async ({ page }) => {
   await page.route("**/api/workspace-scan", async (route) => {
     await route.fulfill({
@@ -596,6 +843,102 @@ test("returns JSON error shape for provider fetch and JSON failures", async () =
 
     expect(jsonFailure.status).toBe(502);
     await expect(jsonFailure.json()).resolves.toEqual({ error: "CLoD response was not valid JSON" });
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalApiKey === undefined) {
+      delete process.env.CLOD_API_KEY;
+    } else {
+      process.env.CLOD_API_KEY = originalApiKey;
+    }
+  }
+});
+
+test("streams analyze route success responses as newline-delimited report chunks", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalApiKey = process.env.CLOD_API_KEY;
+  process.env.CLOD_API_KEY = "test-clod-key";
+
+  try {
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  agent_readiness_score: 80,
+                  workspace_safety_score: 74,
+                  nutrition_label: {
+                    irreversibility: {
+                      value: "High",
+                      why: "Booking travel can spend money.",
+                      evidence: "book whatever is cheapest",
+                      fixes: ["Require approval before purchase"],
+                      suggested_text: "Do not book or purchase anything without explicit approval.",
+                      expected_impact: "Prevents accidental charges.",
+                    },
+                  },
+                  safety_issues: [
+                    {
+                      code: "V-STREAM-API",
+                      title: "Approval required before purchase",
+                      risk: "The agent could spend money.",
+                      evidence: "credit card saved",
+                      fix_options: ["Block purchase"],
+                      benefit: "Prevents irreversible action.",
+                      resolved: false,
+                    },
+                  ],
+                  approval_queue: [
+                    {
+                      id: "api-booking",
+                      question: "Can the agent book directly?",
+                      options: ["Recommend only"],
+                      selected_option: "Recommend only",
+                      custom_instruction: "",
+                    },
+                  ],
+                  work_order: {
+                    goal: "Research NYC options only.",
+                    allowed_actions: ["search"],
+                    blocked_actions: ["book", "purchase"],
+                    requires_approval: ["booking", "payment"],
+                    missing_info: ["exact dates"],
+                    success_criteria: ["Return options"],
+                    receipt_required: true,
+                  },
+                  receipt_template: ["Actions taken", "Money spent"],
+                  cursor_handoff_prompt:
+                    "Use this Agent Brief as your execution contract. Do not book or purchase anything without explicit approval.",
+                }),
+              },
+            },
+          ],
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        },
+      );
+
+    const response = await POST(
+      new Request("http://127.0.0.1:3000/api/analyze", {
+        method: "POST",
+        body: JSON.stringify({ task: "Plan my NYC trip" }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Content-Type")).toContain("application/x-ndjson");
+
+    const lines = (await response.text())
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as { type: string; report?: { cursor_handoff_prompt?: string; safety_issues?: unknown[] } });
+
+    expect(lines.map((line) => line.type)).toEqual(["progress", "section", "section", "section", "section", "section", "complete"]);
+    expect(lines.at(-1)?.report?.cursor_handoff_prompt).toContain("Do not book or purchase anything");
+    expect(lines.find((line) => line.report?.safety_issues)?.report?.safety_issues).toHaveLength(1);
   } finally {
     globalThis.fetch = originalFetch;
     if (originalApiKey === undefined) {
