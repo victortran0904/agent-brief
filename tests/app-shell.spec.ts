@@ -478,6 +478,7 @@ test("uses fallback receipt items when a required receipt has no usable template
 
   const receipt = page.getByLabel("Required Agent Receipt");
   await expect(receipt).toContainText("Agent Brief used a default receipt checklist");
+  await expect(receipt).toContainText("usable receipt template");
   await expect(receipt).toContainText("Actions taken");
   await expect(receipt).toContainText("Sources checked");
   await expect(receipt).toContainText("Remaining uncertainty");

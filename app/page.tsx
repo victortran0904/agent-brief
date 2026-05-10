@@ -746,7 +746,9 @@ export default function Home() {
             {receiptState.required ? (
               <>
                 {receiptState.usedFallback ? (
-                  <p className="receipt-note">Agent Brief used a default receipt checklist because the model did not provide one.</p>
+                  <p className="receipt-note">
+                    Agent Brief used a default receipt checklist because the model did not provide a usable receipt template.
+                  </p>
                 ) : null}
                 <div className="receipt-list">
                   {receiptState.items.map((item) => (

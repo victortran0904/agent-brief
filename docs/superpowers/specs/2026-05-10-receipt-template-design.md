@@ -68,7 +68,7 @@ When `required` is true:
 
 - Show the existing "Required Agent Receipt" card.
 - Render the derived receipt items.
-- If `usedFallback` is true, add a compact note that Agent Brief used a default receipt checklist because the model did not provide one.
+- If `usedFallback` is true, add a compact note that Agent Brief used a default receipt checklist because the model did not provide a usable receipt template.
 
 When `required` is false:
 
