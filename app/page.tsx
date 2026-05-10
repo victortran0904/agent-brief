@@ -281,6 +281,7 @@ export default function Home() {
   const [context, setContext] = useState(demoPresets[0].context);
   const [openNutrition, setOpenNutrition] = useState("staleness_risk");
   const [copyState, setCopyState] = useState<"idle" | "cursor" | "json">("idle");
+  const [copyNotice, setCopyNotice] = useState<string | null>(null);
   const [leftWidth, setLeftWidth] = useState(48);
   const [workspaceScan, setWorkspaceScan] = useState<WorkspaceScanResult | null>(null);
   const [scanError, setScanError] = useState("");
@@ -304,6 +305,13 @@ export default function Home() {
     [approvalSelections, customInstructions, report, safetyResolutions],
   );
   const derivedWorkOrder = workOrderState.workOrder;
+  const baselineWorkOrder = useMemo(() => {
+    try {
+      return applyClientPatches(report, {}, {}, {});
+    } catch {
+      return report.work_order;
+    }
+  }, [report]);
   const receiptState = useMemo(
     () => deriveReceiptState(derivedWorkOrder, report.receipt_template),
     [derivedWorkOrder, report.receipt_template],
@@ -312,6 +320,7 @@ export default function Home() {
     () => buildCursorHandoffPrompt(report.cursor_handoff_prompt, derivedWorkOrder, receiptState),
     [derivedWorkOrder, receiptState, report.cursor_handoff_prompt],
   );
+  const workOrderLive = useMemo(() => !workOrdersEqual(derivedWorkOrder, baselineWorkOrder), [baselineWorkOrder, derivedWorkOrder]);
   const rawJson = useMemo(
     () =>
       JSON.stringify(
@@ -637,7 +646,7 @@ export default function Home() {
                       <div className="nutrition-detail">
                         <DetailRow label="Why" text={row.entry.why} />
                         <DetailRow label="Evidence" text={row.entry.evidence} />
-                        <DetailRow label="Fixes" text={row.entry.fixes.join("; ")} />
+                        <FixList fixes={row.entry.fixes} />
                         <DetailRow label="Suggested text" text={row.entry.suggested_text} />
                         <DetailRow label="Expected impact" text={row.entry.expected_impact} />
                       </div>
@@ -650,7 +659,9 @@ export default function Home() {
 
           <section className="card">
             <CardHeader title="Safety Issues" meta={formatIssueMeta(report.safety_issues, safetyResolutions)} />
-            <p className="section-subtitle">Agent OSHA violations - each item explains risk, evidence, fix, and benefit.</p>
+            <p className="section-subtitle section-brand-line">
+              <span className="section-brand">Agent OSHA violations</span>
+            </p>
 
             {report.safety_issues.map((issue) => {
               const resolvedByDefault = issue.resolved;
@@ -658,23 +669,27 @@ export default function Home() {
               const isResolved = resolvedByDefault || Boolean(selectedResolution);
 
               return (
-                <div className={`issue ${isResolved ? "resolved" : ""}`} key={issue.code}>
+                <div className={`issue ${isResolved ? "resolved" : "issue-open"}`} key={issue.code}>
                   <div className="issue-code">{issue.code}</div>
-                  <div>
+                  <div className="issue-body">
                     <h3>
-                      {issue.title} {isResolved ? <span className="resolved-badge">Resolved</span> : null}
+                      {issue.title} {isResolved ? <span className="resolved-badge">Resolved</span> : <span className="open-badge">Open</span>}
                     </h3>
-                    <p>Risk: {issue.risk}</p>
+                    <div className="issue-risk-block">
+                      <div className="detail-label">Risk</div>
+                      <p>{issue.risk}</p>
+                    </div>
                     <div className="issue-grid">
                       <div>
                         <div className="detail-label">Evidence</div>
                         <div className="detail-text">{issue.evidence}</div>
                       </div>
                       <div>
-                        <div className="detail-label">Benefit</div>
+                        <div className="detail-label">If resolved</div>
                         <div className="detail-text">{issue.benefit}</div>
                       </div>
                     </div>
+                    <div className="detail-label issue-fix-label">Choose a fix</div>
                     <div className="option-row">
                       {issue.fix_options.map((option) => (
                         <button
@@ -695,6 +710,7 @@ export default function Home() {
 
           <section className="card">
             <CardHeader title="Approval Queue" meta={`${report.approval_queue.length} items`} />
+            <p className="section-subtitle">Approve, reject, clarify, or add a custom instruction—choices merge into the Work Order.</p>
             {report.approval_queue.map((item, index) => {
               const selected = approvalSelections[item.id] ?? item.selected_option ?? item.options[0] ?? "";
               const customValue = customInstructions[item.id] ?? item.custom_instruction ?? "";
@@ -735,24 +751,28 @@ export default function Home() {
           </section>
 
           <section className="card" aria-label="Agent Work Order">
-            <CardHeader title="Agent Work Order" meta="Execution contract" />
-            <div className="work-order-goal">{derivedWorkOrder.goal}</div>
+            <CardHeader title="Agent Work Order" meta={workOrderLive ? "Live — updated from your answers" : "Execution contract"} />
+            <div className={`work-order-goal ${workOrderLive ? "work-order-goal--live" : ""}`}>
+              {derivedWorkOrder.goal}
+              {workOrderLive ? (
+                <span className="live-pill" title="Differs from the model baseline because you resolved Safety Issues or answered the queue">
+                  Updated
+                </span>
+              ) : null}
+            </div>
             <WorkOrderField label="Allowed" values={derivedWorkOrder.allowed_actions} tone="safe" />
             <WorkOrderField label="Blocked" values={derivedWorkOrder.blocked_actions} tone="blocked" />
             <WorkOrderField label="Ask First" values={derivedWorkOrder.requires_approval} tone="approval" />
             <WorkOrderText label="Missing Info" value={derivedWorkOrder.missing_info.join("; ") || "None"} />
-            <WorkOrderText label="Success" value={derivedWorkOrder.success_criteria.join("; ")} />
+            <WorkOrderText label="Success criteria" value={derivedWorkOrder.success_criteria.join("; ")} />
             {derivedWorkOrder.custom_instructions?.length ? (
-              <WorkOrderText label="Custom" value={derivedWorkOrder.custom_instructions.join("; ")} />
+              <WorkOrderText label="Custom instructions" value={derivedWorkOrder.custom_instructions.join("; ")} />
             ) : null}
             {workOrderState.error ? (
               <p className="work-order-warning" role="alert">
                 {workOrderState.error}
               </p>
             ) : null}
-            <pre aria-label="Cursor handoff prompt" className="handoff-payload">
-              {cursorHandoffPrompt}
-            </pre>
 
             <div className="handoff-actions">
               <button className="copy-primary" onClick={() => copyText(cursorHandoffPrompt, "cursor")} type="button">
@@ -762,15 +782,29 @@ export default function Home() {
                 {copyJsonLabel}
               </button>
             </div>
-            <p className="copy-hint">Primary handoff is a readable Cursor-ready prompt. JSON stays available as a secondary export.</p>
-          </section>
-
-          <section className="card" aria-label="Raw analysis JSON export">
-            <CardHeader title="Raw JSON" meta="secondary export" />
-            <pre aria-label="Raw analysis JSON" className="handoff-payload">
-              {rawJson}
+            {copyNotice ? (
+              <p className="copy-notice" role="status" aria-live="polite">
+                {copyNotice}
+              </p>
+            ) : null}
+            <p className="copy-hint">
+              Copy packages this Work Order for Cursor—you run the agent locally; Agent Brief does not execute it. Full JSON sits in the export
+              panel below.
+            </p>
+            <pre aria-label="Cursor handoff prompt" className="handoff-payload handoff-preview">
+              {cursorHandoffPrompt}
             </pre>
           </section>
+
+          <details className="card json-export" aria-label="Full JSON export">
+            <summary className="json-export-summary">
+              <span className="json-export-title">Full JSON export</span>
+              <span className="json-export-meta">collapsed — model output + patched Work Order</span>
+            </summary>
+            <pre aria-label="Raw analysis JSON" className="handoff-payload json-export-pre">
+              {rawJson}
+            </pre>
+          </details>
 
           <section className="card" aria-label={receiptState.required ? "Required Agent Receipt" : "Agent Receipt"}>
             <CardHeader title={receiptState.required ? "Required Agent Receipt" : "Agent Receipt"} />
@@ -800,13 +834,18 @@ export default function Home() {
   );
 
   async function copyText(text: string, kind: "cursor" | "json") {
-    try {
-      await navigator.clipboard?.writeText(text);
-    } catch {
-      // Clipboard permission is unavailable in some test/browser contexts; the visible export remains on screen.
+    if (!navigator.clipboard?.writeText) {
+      setCopyNotice("Clipboard API unavailable in this context. Select the text in the handoff or JSON panel and copy manually.");
+      return;
     }
 
-    flashCopy(kind);
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopyNotice(null);
+      flashCopy(kind);
+    } catch {
+      setCopyNotice("Could not write to the clipboard. Select the text and copy manually (⌘C / Ctrl+C).");
+    }
   }
 }
 
@@ -1334,7 +1373,7 @@ ${workOrder.custom_instructions?.length ? `Custom instructions: ${workOrder.cust
 }
 
 function ScoreCard({ label, value }: { label: string; value: number }) {
-  const tone = value < 45 ? "low" : "medium";
+  const tone = value < 45 ? "low" : value < 70 ? "medium" : "high";
 
   return (
     <div className="score-card">
@@ -1365,6 +1404,41 @@ function DetailRow({ label, text }: { label: string; text: string }) {
       <div className="detail-label">{label}</div>
       <div className="detail-text">{text}</div>
     </div>
+  );
+}
+
+function FixList({ fixes }: { fixes: string[] }) {
+  if (!fixes.length) {
+    return (
+      <div className="detail-row">
+        <div className="detail-label">Actionable fixes</div>
+        <div className="detail-text">None listed</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="detail-row">
+      <div className="detail-label">Actionable fixes</div>
+      <ul className="fix-list">
+        {fixes.map((fix, index) => (
+          <li key={`${fix}-${index}`}>{fix}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function workOrdersEqual(a: WorkOrder, b: WorkOrder): boolean {
+  return (
+    a.goal === b.goal &&
+    a.receipt_required === b.receipt_required &&
+    JSON.stringify(a.allowed_actions) === JSON.stringify(b.allowed_actions) &&
+    JSON.stringify(a.blocked_actions) === JSON.stringify(b.blocked_actions) &&
+    JSON.stringify(a.requires_approval) === JSON.stringify(b.requires_approval) &&
+    JSON.stringify(a.missing_info) === JSON.stringify(b.missing_info) &&
+    JSON.stringify(a.success_criteria) === JSON.stringify(b.success_criteria) &&
+    JSON.stringify(a.custom_instructions ?? []) === JSON.stringify(b.custom_instructions ?? [])
   );
 }
 

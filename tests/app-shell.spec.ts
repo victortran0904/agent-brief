@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { buildClodRequest, POST } from "../app/api/analyze/route";
+import { buildClodRequest, extractAnalysisJsonFromMessage, POST } from "../app/api/analyze/route";
 
 const scanFixtureDir = path.join(process.cwd(), "00-scan-preview-fixture");
 
@@ -1092,11 +1092,15 @@ test("builds a CLoD-compatible analyze provider request", () => {
 
   const body = JSON.parse(providerRequest.init.body as string) as {
     model: string;
+    temperature: number;
+    max_completion_tokens: number;
     response_format: { type: string };
     messages: Array<{ role: string; content: string }>;
   };
 
   expect(body.model).toBe("DeepSeek V3");
+  expect(body.temperature).toBe(0.2);
+  expect(body.max_completion_tokens).toBe(8192);
   expect(body.response_format).toEqual({ type: "json_object" });
   expect(body.messages[0]).toMatchObject({ role: "system" });
   expect(body.messages[0].content).toContain("Return only valid JSON using this extended schema");
@@ -1121,6 +1125,18 @@ test("builds a CLoD-compatible analyze provider request", () => {
   });
   expect(userContent.workspace_file_context).toContain("--- README.md ---\nworkspace instructions\n");
   expect(userContent.workspace_file_context).toContain("--- src/large.ts ---\nlarge workspace content\n[truncated]");
+});
+
+test("extractAnalysisJsonFromMessage strips markdown fences and embedded prose", () => {
+  const wrapped = 'Here you go:\n```json\n{"agent_readiness_score": 1, "x": "y"}\n```';
+  expect(extractAnalysisJsonFromMessage(wrapped)).toMatchObject({
+    agent_readiness_score: 1,
+    x: "y",
+  });
+
+  expect(extractAnalysisJsonFromMessage('Prefix {"agent_readiness_score": 2}')).toMatchObject({
+    agent_readiness_score: 2,
+  });
 });
 
 test("returns JSON error shape for provider fetch and JSON failures", async () => {

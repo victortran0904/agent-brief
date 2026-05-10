@@ -5,6 +5,9 @@ export const dynamic = "force-dynamic";
 const CLOD_CHAT_COMPLETIONS_URL = "https://api.clod.io/v1/chat/completions";
 const MODEL = "DeepSeek V3";
 
+/** Per https://clod.io/docs — omitting max_completion_tokens relies on model defaults and often truncates large JSON outputs. */
+const MAX_COMPLETION_TOKENS = 8192;
+
 type WorkspaceFile = {
   path?: string;
   sourceLabel?: string;
@@ -28,6 +31,7 @@ type ClodRequestInput = {
 
 type ClodProviderPayload = {
   choices?: Array<{
+    finish_reason?: string;
     message?: {
       content?: unknown;
     };
@@ -49,7 +53,7 @@ type AnalysisStreamChunk =
     };
 
 export async function POST(request: Request) {
-  const apiKey = process.env.CLOD_API_KEY;
+  const apiKey = process.env.CLOD_API_KEY?.trim();
 
   if (!apiKey) {
     return NextResponse.json({ error: "CLOD_API_KEY is not configured" }, { status: 500 });
@@ -97,16 +101,50 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "CLoD response was not valid JSON" }, { status: 502 });
   }
 
-  const content = providerPayload?.choices?.[0]?.message?.content;
+  const choice = providerPayload?.choices?.[0];
+  const content = choice?.message?.content;
+  const finishReason = choice?.finish_reason;
 
   if (typeof content !== "string") {
     return NextResponse.json({ error: "CLoD response did not include JSON content" }, { status: 502 });
   }
 
   try {
-    return streamAnalysisReport(JSON.parse(content) as Record<string, unknown>);
+    const report = extractAnalysisJsonFromMessage(content);
+
+    return streamAnalysisReport(report);
   } catch {
-    return NextResponse.json({ error: "CLoD response was not valid JSON", raw: content }, { status: 502 });
+    const truncated = finishReason === "length";
+
+    return NextResponse.json(
+      {
+        error: truncated
+          ? "CLoD returned incomplete JSON (output was truncated). Increase max_completion_tokens or simplify the task context."
+          : "CLoD response was not valid JSON",
+        raw: content,
+      },
+      { status: 502 },
+    );
+  }
+}
+
+/** Parses assistant message text into the Agent Brief report object (handles ```json fences and leading prose). */
+export function extractAnalysisJsonFromMessage(content: string): Record<string, unknown> {
+  const trimmed = content.trim();
+  const fenceMatch = trimmed.match(/```(?:json)?\s*\n?([\s\S]*?)```/);
+  let candidate = fenceMatch ? fenceMatch[1].trim() : trimmed;
+
+  try {
+    return JSON.parse(candidate) as Record<string, unknown>;
+  } catch {
+    const start = candidate.indexOf("{");
+    const end = candidate.lastIndexOf("}");
+
+    if (start === -1 || end <= start) {
+      throw new Error("No JSON object in model content");
+    }
+
+    return JSON.parse(candidate.slice(start, end + 1)) as Record<string, unknown>;
   }
 }
 
@@ -123,6 +161,8 @@ export function buildClodRequest({ apiKey, task, context, workspaceFiles }: Clod
       },
       body: JSON.stringify({
         model: MODEL,
+        temperature: 0.2,
+        max_completion_tokens: MAX_COMPLETION_TOKENS,
         response_format: { type: "json_object" },
         messages: [
           {
