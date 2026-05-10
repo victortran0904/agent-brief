@@ -365,6 +365,13 @@ test("runs analysis with task, extra context, and workspace files, then renders 
   await page.getByLabel("Can the agent book directly? custom instruction").fill("Only hold refundable fares for review.");
   await expect(workOrder).toContainText("Only hold refundable fares for review.");
   await expect(page.getByLabel("Cursor handoff prompt")).toContainText("Do not book or purchase anything without explicit approval.");
+
+  await page.getByRole("button", { name: /Code Refactor/ }).click();
+  await expect(page.getByLabel("Task")).toHaveValue(/Refactor the authentication module/);
+  await expect(page.getByText("28/100")).not.toBeVisible();
+  await expect(page.getByText("39/100")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Financial irreversible action without approval" })).not.toBeVisible();
+  await expect(workOrder).not.toContainText("Only hold refundable fares for review.");
 });
 
 test("streams analysis progress and progressively renders the final report", async ({ page }) => {

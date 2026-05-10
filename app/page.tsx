@@ -309,6 +309,10 @@ export default function Home() {
     setAnalysisError("");
     setAnalysisStatus("");
     setLastAnalyzePayload(null);
+    setReport(defaultReport);
+    setSafetyResolutions({});
+    setApprovalSelections({});
+    setCustomInstructions({});
   }
 
   useEffect(() => {
