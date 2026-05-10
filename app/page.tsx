@@ -733,53 +733,63 @@ async function readAnalysisResponse(response: Response, onChunk: (chunk: Analysi
   let streamedReport: Partial<AnalysisReport> = {};
   let completedReport: AnalysisReport | null = null;
 
-  while (true) {
-    const { done, value } = await reader.read();
-    buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
 
-    const lines = buffer.split("\n");
-    buffer = lines.pop() ?? "";
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
 
-    for (const line of lines) {
-      const chunk = parseAnalysisStreamChunk(line);
+      for (const line of lines) {
+        if (!line.trim()) {
+          continue;
+        }
+
+        const chunk = parseAnalysisStreamChunk(line);
+
+        if (chunk.type === "error") {
+          await reader.cancel().catch(() => {});
+          throw new Error(formatStreamFailure(chunk));
+        }
+
+        if (chunk.type === "progress") {
+          onChunk({ ...chunk, report: streamedReport });
+          continue;
+        }
+
+        streamedReport = mergeReportPatch(streamedReport, chunk.report ?? {});
+        onChunk({ ...chunk, report: streamedReport });
+
+        if (chunk.type === "complete") {
+          completedReport = normalizeReport(streamedReport);
+        }
+      }
+
+      if (done) {
+        break;
+      }
+    }
+
+    if (buffer.trim()) {
+      const chunk = parseAnalysisStreamChunk(buffer);
 
       if (chunk.type === "error") {
+        await reader.cancel().catch(() => {});
         throw new Error(formatStreamFailure(chunk));
       }
 
-      if (chunk.type === "progress") {
+      if (chunk.type !== "progress") {
+        streamedReport = mergeReportPatch(streamedReport, chunk.report ?? {});
         onChunk({ ...chunk, report: streamedReport });
-        continue;
-      }
 
-      streamedReport = mergeReportPatch(streamedReport, chunk.report ?? {});
-      onChunk({ ...chunk, report: streamedReport });
-
-      if (chunk.type === "complete") {
-        completedReport = normalizeReport(streamedReport);
+        if (chunk.type === "complete") {
+          completedReport = normalizeReport(streamedReport);
+        }
       }
     }
-
-    if (done) {
-      break;
-    }
-  }
-
-  if (buffer.trim()) {
-    const chunk = parseAnalysisStreamChunk(buffer);
-
-    if (chunk.type === "error") {
-      throw new Error(formatStreamFailure(chunk));
-    }
-
-    if (chunk.type !== "progress") {
-      streamedReport = mergeReportPatch(streamedReport, chunk.report ?? {});
-      onChunk({ ...chunk, report: streamedReport });
-
-      if (chunk.type === "complete") {
-        completedReport = normalizeReport(streamedReport);
-      }
-    }
+  } finally {
+    reader.releaseLock();
   }
 
   if (!completedReport) {

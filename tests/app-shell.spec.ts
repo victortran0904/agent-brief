@@ -423,6 +423,10 @@ test("streams analysis progress and progressively renders the final report", asy
           start(controller) {
             chunks.forEach((chunk, index) => {
               window.setTimeout(() => {
+                if (index === 1) {
+                  controller.enqueue(encoder.encode("\n"));
+                }
+
                 controller.enqueue(encoder.encode(`${JSON.stringify(chunk)}\n`));
 
                 if (index === chunks.length - 1) {

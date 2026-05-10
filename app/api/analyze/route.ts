@@ -244,10 +244,9 @@ export function streamAnalysisReport(report: Record<string, unknown>) {
 
   return new Response(
     new ReadableStream({
-      async start(controller) {
+      start(controller) {
         for (const chunk of buildAnalysisStreamChunks(report)) {
           controller.enqueue(encoder.encode(`${JSON.stringify(chunk)}\n`));
-          await delay(40);
         }
 
         controller.close();
@@ -292,8 +291,4 @@ export function buildAnalysisStreamChunks(report: Record<string, unknown>): Anal
 
 function pickReportFields(report: Record<string, unknown>, fields: string[]) {
   return Object.fromEntries(fields.filter((field) => field in report).map((field) => [field, report[field]]));
-}
-
-function delay(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
