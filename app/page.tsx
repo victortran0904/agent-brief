@@ -80,6 +80,43 @@ type AnalysisReport = {
   cursor_handoff_prompt: string;
 };
 
+type DemoPreset = {
+  id: string;
+  title: string;
+  summary: string;
+  task: string;
+  context: string;
+};
+
+const demoPresets: DemoPreset[] = [
+  {
+    id: "nyc-travel",
+    title: "NYC Travel",
+    summary: "Budget gaps, stale preferences, payment approval, Safety Issues, and Cursor handoff.",
+    task: "Plan my NYC trip next weekend and book whatever is cheapest.",
+    context:
+      "I have old travel preferences, Gmail access, and a credit card saved in Chrome. I do not know my budget yet. Treat old preferences as stale unless confirmed, do not share personal details with vendors without asking, and require approval before booking or payment.",
+  },
+  {
+    id: "code-refactor",
+    title: "Code Refactor",
+    summary: "Workspace readiness, ambiguous source of truth, success criteria, and Work Order updates.",
+    task:
+      "Refactor the authentication module so it is easier for Cursor agents to maintain, but avoid changing user-visible login behavior.",
+    context:
+      "The source of truth is unclear between README guidance, inline comments, and an older architecture note. The workspace may have uncommitted edits. Success criteria are ambiguous: I want better structure, focused tests, and a Work Order update before implementation if the agent finds conflicting ownership or hidden dependencies.",
+  },
+  {
+    id: "email-campaign",
+    title: "Email Campaign",
+    summary: "Sending, privacy, approval decisions, reject choices, and custom instructions.",
+    task:
+      "Draft and send a launch email campaign to beta customers announcing the new Agent Brief workflow improvements.",
+    context:
+      "Use the customer CSV and prior campaign copy as context, but do not expose private customer data. The agent may draft subject lines and segmentation notes, but sending email, importing contacts, using customer names, or changing unsubscribe settings requires explicit approval. Include approve, reject, and custom-instruction decisions before any outbound action.",
+  },
+];
+
 const defaultReport: AnalysisReport = {
   agent_readiness_score: 39,
   workspace_safety_score: 46,
@@ -220,10 +257,9 @@ const defaultReport: AnalysisReport = {
 };
 
 export default function Home() {
-  const [task, setTask] = useState("Plan my NYC trip next weekend and book whatever is cheapest.");
-  const [context, setContext] = useState(
-    "I have old travel preferences, Gmail access, and a credit card saved in Chrome. I do not know my budget yet.",
-  );
+  const [selectedPresetId, setSelectedPresetId] = useState(demoPresets[0].id);
+  const [task, setTask] = useState(demoPresets[0].task);
+  const [context, setContext] = useState(demoPresets[0].context);
   const [openNutrition, setOpenNutrition] = useState("staleness_risk");
   const [copyState, setCopyState] = useState<"idle" | "cursor" | "json">("idle");
   const [leftWidth, setLeftWidth] = useState(48);
@@ -265,6 +301,15 @@ export default function Home() {
       ),
     [cursorHandoffPrompt, derivedWorkOrder, report],
   );
+
+  function selectPreset(preset: DemoPreset) {
+    setSelectedPresetId(preset.id);
+    setTask(preset.task);
+    setContext(preset.context);
+    setAnalysisError("");
+    setAnalysisStatus("");
+    setLastAnalyzePayload(null);
+  }
 
   useEffect(() => {
     let isMounted = true;
@@ -421,15 +466,48 @@ export default function Home() {
             <p>Describe what the agent should do. Agent Brief audits the task before the agent starts.</p>
           </header>
 
+          <section className="demo-presets" aria-label="Demo presets">
+            <div className="field-label">Demo Presets</div>
+            <div className="preset-grid">
+              {demoPresets.map((preset) => (
+                <button
+                  aria-label={`${preset.title} demo preset`}
+                  aria-pressed={selectedPresetId === preset.id}
+                  className={selectedPresetId === preset.id ? "preset-card selected" : "preset-card"}
+                  key={preset.id}
+                  onClick={() => selectPreset(preset)}
+                  type="button"
+                >
+                  <span>{preset.title}</span>
+                  <small>{preset.summary}</small>
+                </button>
+              ))}
+            </div>
+          </section>
+
           <div className="field">
             <label htmlFor="task">Task</label>
-            <textarea id="task" onChange={(event) => setTask(event.target.value)} value={task} />
+            <textarea
+              id="task"
+              onChange={(event) => {
+                setSelectedPresetId("");
+                setTask(event.target.value);
+              }}
+              value={task}
+            />
           </div>
 
           <div className="field">
             <label htmlFor="context">Additional Context</label>
             <p>Extra workspace context that is not visible in project files.</p>
-            <textarea id="context" onChange={(event) => setContext(event.target.value)} value={context} />
+            <textarea
+              id="context"
+              onChange={(event) => {
+                setSelectedPresetId("");
+                setContext(event.target.value);
+              }}
+              value={context}
+            />
           </div>
 
           <div className="field">

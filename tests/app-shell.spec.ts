@@ -40,6 +40,9 @@ test("renders the local Agent Brief app shell", async ({ page }) => {
 
   await expect(page).toHaveTitle(/Agent Brief/);
   await expect(page.getByRole("heading", { name: "Pre-flight Check" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /NYC Travel/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Code Refactor/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Email Campaign/ })).toBeVisible();
   await expect(page.getByLabel("Task")).toBeVisible();
   await expect(page.getByLabel("Additional Context")).toBeVisible();
   await expect(page.getByText("Workspace Files")).toBeVisible();
@@ -61,6 +64,74 @@ test("renders the local Agent Brief app shell", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Required Agent Receipt" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Copy for Cursor" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Copy JSON" })).toBeVisible();
+});
+
+test("demo presets fill inputs and run through the standard analyze path", async ({ page }) => {
+  let analyzeRequest: unknown = null;
+
+  await page.route("**/api/workspace-scan", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        rootPath: "/Users/local/private/workspace",
+        maxDepth: 3,
+        files: [
+          {
+            path: "README.md",
+            sourceLabel: "README.md",
+            extension: ".md",
+            sizeBytes: 12,
+            content: "workspace policy\n",
+            truncated: false,
+          },
+        ],
+      }),
+    });
+  });
+
+  await page.route("**/api/analyze", async (route) => {
+    analyzeRequest = route.request().postDataJSON();
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        agent_readiness_score: 66,
+        workspace_safety_score: 63,
+        nutrition_label: {},
+        safety_issues: [],
+        approval_queue: [],
+        work_order: {
+          goal: "Refactor the auth module safely.",
+          allowed_actions: ["read", "edit", "test"],
+          blocked_actions: ["rewrite unrelated modules"],
+          requires_approval: ["source-of-truth decision"],
+          missing_info: ["success criteria"],
+          success_criteria: ["Return a Work Order update before implementation"],
+          receipt_required: true,
+        },
+        receipt_template: ["Actions taken"],
+        cursor_handoff_prompt: "Use this Agent Brief as your execution contract.",
+      }),
+    });
+  });
+
+  await page.goto("/");
+  await page.getByRole("button", { name: /Code Refactor/ }).click();
+
+  await expect(page.getByLabel("Task")).toHaveValue(/Refactor the authentication module/);
+  await expect(page.getByLabel("Additional Context")).toHaveValue(/source of truth is unclear/);
+
+  await page.getByRole("button", { name: "Run Pre-flight Check" }).click();
+
+  expect(analyzeRequest).toMatchObject({
+    task: expect.stringContaining("Refactor the authentication module"),
+    context: expect.stringContaining("source of truth is unclear"),
+    workspaceFiles: [
+      expect.objectContaining({
+        path: "README.md",
+      }),
+    ],
+  });
+  await expect(page.locator(".work-order-goal")).toContainText("Refactor the auth module safely.");
 });
 
 test("supports placeholder report interactions", async ({ page }) => {
