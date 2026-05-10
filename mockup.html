@@ -1,0 +1,765 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Agent Brief — Pre-flight Checklist for AI Agents</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --color-canvas: #000000;
+      --color-card: #0b0e14;
+      --color-border: #292d30;
+      --color-smoke: #464a4d;
+      --color-ash: #6c6c6c;
+      --color-fog: #a1a4a5;
+      --color-frost: #f0f0f0;
+      --color-white: #ffffff;
+      --color-blue: #3b9eff;
+      --color-violet: #9281f7;
+      --color-green: #3ad389;
+      --color-red: #ff9592;
+      --color-yellow: #ffca16;
+      --color-light-blue: #70b8ff;
+
+      --font-sans: 'Inter', -apple-system, system-ui, sans-serif;
+      --font-mono: 'JetBrains Mono', monospace;
+
+      --radius-card: 16px;
+      --radius-button: 6px;
+      --radius-badge: 6px;
+      --radius-pill: 10px;
+    }
+
+    body {
+      font-family: var(--font-sans);
+      background: var(--color-canvas);
+      color: var(--color-frost);
+      min-height: 100vh;
+      line-height: 1.5;
+    }
+
+    /* Nav */
+    .nav {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      height: 59px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 32px;
+      border-bottom: 1px solid var(--color-border);
+      backdrop-filter: blur(25px);
+      background: rgba(0, 0, 0, 0.8);
+    }
+
+    .nav-brand {
+      font-size: 16px;
+      font-weight: 600;
+      color: var(--color-white);
+      letter-spacing: -0.02em;
+    }
+
+    .nav-brand span {
+      color: var(--color-fog);
+      font-weight: 400;
+    }
+
+    .nav-actions {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .nav-link {
+      color: var(--color-fog);
+      font-size: 14px;
+      text-decoration: none;
+      opacity: 0.71;
+    }
+
+    .btn-outline {
+      padding: 8px 16px;
+      border: 1px solid var(--color-blue);
+      border-radius: var(--radius-button);
+      background: transparent;
+      color: var(--color-white);
+      font-size: 14px;
+      font-weight: 500;
+      font-family: var(--font-sans);
+      cursor: pointer;
+      transition: background 0.15s ease;
+    }
+
+    .btn-outline:hover {
+      background: rgba(59, 158, 255, 0.1);
+    }
+
+    /* Main Layout */
+    .main {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0;
+      max-width: 1400px;
+      margin: 0 auto;
+      min-height: calc(100vh - 59px);
+    }
+
+    /* Left Panel - Input */
+    .panel-input {
+      padding: 48px 40px;
+      border-right: 1px solid var(--color-border);
+      display: flex;
+      flex-direction: column;
+      gap: 32px;
+    }
+
+    .panel-header {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .panel-title {
+      font-size: 24px;
+      font-weight: 600;
+      color: var(--color-white);
+      letter-spacing: -0.02em;
+    }
+
+    .panel-subtitle {
+      font-size: 14px;
+      color: var(--color-fog);
+    }
+
+    .input-group {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .input-label {
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--color-frost);
+    }
+
+    .input-label-sub {
+      font-size: 12px;
+      color: var(--color-ash);
+      margin-top: 2px;
+    }
+
+    textarea {
+      width: 100%;
+      min-height: 120px;
+      padding: 16px;
+      background: var(--color-card);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-card);
+      color: var(--color-frost);
+      font-family: var(--font-sans);
+      font-size: 14px;
+      line-height: 1.6;
+      resize: vertical;
+      transition: border-color 0.15s ease;
+    }
+
+    textarea:focus {
+      outline: none;
+      border-color: var(--color-blue);
+    }
+
+    textarea::placeholder {
+      color: var(--color-smoke);
+    }
+
+    .workspace-area {
+      min-height: 160px;
+    }
+
+    .file-drop {
+      border: 1px dashed var(--color-border);
+      border-radius: var(--radius-card);
+      padding: 24px;
+      text-align: center;
+      color: var(--color-ash);
+      font-size: 13px;
+      cursor: pointer;
+      transition: border-color 0.15s ease;
+    }
+
+    .file-drop:hover {
+      border-color: var(--color-fog);
+    }
+
+    .file-drop-icon {
+      font-size: 24px;
+      margin-bottom: 8px;
+      opacity: 0.5;
+    }
+
+    .file-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    .file-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      background: var(--color-card);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-badge);
+      font-size: 12px;
+      font-family: var(--font-mono);
+      color: var(--color-fog);
+    }
+
+    .file-chip-x {
+      color: var(--color-smoke);
+      cursor: pointer;
+    }
+
+    .btn-run {
+      width: 100%;
+      padding: 14px 24px;
+      background: transparent;
+      border: 1px solid var(--color-blue);
+      border-radius: var(--radius-button);
+      color: var(--color-white);
+      font-size: 15px;
+      font-weight: 500;
+      font-family: var(--font-sans);
+      cursor: pointer;
+      transition: all 0.15s ease;
+      margin-top: 8px;
+    }
+
+    .btn-run:hover {
+      background: rgba(59, 158, 255, 0.1);
+    }
+
+    .or-divider {
+      text-align: center;
+      font-size: 12px;
+      color: var(--color-smoke);
+      position: relative;
+    }
+
+    .or-divider::before,
+    .or-divider::after {
+      content: '';
+      position: absolute;
+      top: 50%;
+      width: 40%;
+      height: 1px;
+      background: var(--color-border);
+    }
+
+    .or-divider::before { left: 0; }
+    .or-divider::after { right: 0; }
+
+    /* Right Panel - Output */
+    .panel-output {
+      padding: 48px 40px;
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+      overflow-y: auto;
+      max-height: calc(100vh - 59px);
+    }
+
+    /* Score Cards */
+    .scores-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+
+    .score-card {
+      background: var(--color-card);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-card);
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .score-label {
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--color-fog);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .score-value {
+      font-size: 40px;
+      font-weight: 600;
+      letter-spacing: -0.03em;
+    }
+
+    .score-value.low { color: var(--color-red); }
+    .score-value.medium { color: var(--color-yellow); }
+    .score-value.high { color: var(--color-green); }
+
+    .score-bar {
+      height: 4px;
+      border-radius: 2px;
+      background: var(--color-border);
+      overflow: hidden;
+      margin-top: 4px;
+    }
+
+    .score-bar-fill {
+      height: 100%;
+      border-radius: 2px;
+      transition: width 0.6s ease;
+    }
+
+    .score-bar-fill.low { background: var(--color-red); }
+    .score-bar-fill.medium { background: var(--color-yellow); }
+    .score-bar-fill.high { background: var(--color-green); }
+
+    /* Output Cards */
+    .output-card {
+      background: var(--color-card);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-card);
+      padding: 24px;
+    }
+
+    .output-card-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+
+    .output-card-icon {
+      width: 28px;
+      height: 28px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: var(--radius-badge);
+      font-size: 14px;
+    }
+
+    .output-card-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--color-white);
+    }
+
+    .output-card-count {
+      margin-left: auto;
+      font-size: 12px;
+      color: var(--color-ash);
+      font-family: var(--font-mono);
+    }
+
+    /* Violations */
+    .violation {
+      display: flex;
+      gap: 12px;
+      padding: 12px 0;
+      border-bottom: 1px solid var(--color-border);
+    }
+
+    .violation:last-child {
+      border-bottom: none;
+      padding-bottom: 0;
+    }
+
+    .violation-code {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--color-red);
+      white-space: nowrap;
+      padding-top: 2px;
+    }
+
+    .violation-text {
+      font-size: 13px;
+      color: var(--color-fog);
+      line-height: 1.5;
+    }
+
+    .violation-title {
+      color: var(--color-frost);
+      font-weight: 500;
+      font-size: 13px;
+      margin-bottom: 2px;
+    }
+
+    /* Approval Queue */
+    .approval-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--color-border);
+    }
+
+    .approval-item:last-child {
+      border-bottom: none;
+    }
+
+    .approval-number {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--color-blue);
+      min-width: 20px;
+    }
+
+    .approval-text {
+      font-size: 13px;
+      color: var(--color-fog);
+    }
+
+    /* Work Order */
+    .work-order {
+      font-family: var(--font-mono);
+      font-size: 13px;
+      line-height: 1.7;
+      color: var(--color-frost);
+      background: var(--color-canvas);
+      border: 1px solid var(--color-border);
+      border-radius: 8px;
+      padding: 16px;
+      overflow-x: auto;
+    }
+
+    .wo-key {
+      color: var(--color-violet);
+    }
+
+    .wo-string {
+      color: var(--color-green);
+    }
+
+    .wo-bracket {
+      color: var(--color-fog);
+    }
+
+    /* Nutrition Label */
+    .nutrition-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    .nutrition-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 12px;
+      background: var(--color-canvas);
+      border: 1px solid var(--color-border);
+      border-radius: 8px;
+    }
+
+    .nutrition-label {
+      font-size: 12px;
+      color: var(--color-fog);
+    }
+
+    .nutrition-value {
+      font-size: 12px;
+      font-weight: 500;
+      font-family: var(--font-mono);
+    }
+
+    .nutrition-value.risk-high { color: var(--color-red); }
+    .nutrition-value.risk-medium { color: var(--color-yellow); }
+    .nutrition-value.risk-low { color: var(--color-green); }
+
+    /* Empty State */
+    .empty-state {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      gap: 16px;
+      opacity: 0.5;
+    }
+
+    .empty-state-icon {
+      font-size: 48px;
+    }
+
+    .empty-state-text {
+      font-size: 14px;
+      color: var(--color-fog);
+      text-align: center;
+    }
+
+    /* Workspace scan indicator */
+    .scan-status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 14px;
+      background: var(--color-card);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-badge);
+      font-size: 12px;
+      color: var(--color-fog);
+    }
+
+    .scan-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--color-green);
+    }
+
+    .scan-count {
+      font-family: var(--font-mono);
+      color: var(--color-frost);
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Navigation -->
+  <nav class="nav">
+    <div class="nav-brand">Agent Brief <span>v0.1</span></div>
+    <div class="nav-actions">
+      <div class="scan-status">
+        <div class="scan-dot"></div>
+        <span>Workspace: <span class="scan-count">23 files</span> indexed</span>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Main Two-Panel Layout -->
+  <main class="main">
+
+    <!-- Left Panel: Input -->
+    <section class="panel-input">
+      <div class="panel-header">
+        <h1 class="panel-title">Pre-flight Check</h1>
+        <p class="panel-subtitle">Describe what you want the agent to do. Agent Brief will audit the task and your workspace before the agent starts.</p>
+      </div>
+
+      <div class="input-group">
+        <label class="input-label">Task</label>
+        <textarea placeholder="Plan my NYC trip next weekend and book whatever is cheapest.">Plan my NYC trip next weekend and book whatever is cheapest.</textarea>
+      </div>
+
+      <div class="input-group">
+        <label class="input-label">Workspace Context</label>
+        <p class="input-label-sub">Describe what the agent will work with, or drop files below.</p>
+        <textarea class="workspace-area" placeholder="I have a Google Doc with old travel preferences, a spreadsheet of past trips, access to my Gmail, and my credit card saved in Chrome.">I have a Google Doc with old travel preferences, a spreadsheet of past trips, access to my Gmail, and my credit card saved in Chrome. I usually prefer morning flights but not too early. I don't know my budget yet.</textarea>
+      </div>
+
+      <div class="input-group">
+        <div class="or-divider">or scan workspace</div>
+        <div class="file-drop">
+          <div class="file-drop-icon">↑</div>
+          Drop files here or click to browse
+        </div>
+        <div class="file-chips">
+          <div class="file-chip">travel-prefs.md <span class="file-chip-x">×</span></div>
+          <div class="file-chip">past-trips.csv <span class="file-chip-x">×</span></div>
+          <div class="file-chip">booking-rules.txt <span class="file-chip-x">×</span></div>
+        </div>
+      </div>
+
+      <button class="btn-run">Run Pre-flight Check →</button>
+    </section>
+
+    <!-- Right Panel: Output -->
+    <section class="panel-output">
+
+      <!-- Scores -->
+      <div class="scores-row">
+        <div class="score-card">
+          <div class="score-label">Agent Readiness</div>
+          <div class="score-value low">39</div>
+          <div class="score-bar">
+            <div class="score-bar-fill low" style="width: 39%"></div>
+          </div>
+        </div>
+        <div class="score-card">
+          <div class="score-label">Workspace Safety</div>
+          <div class="score-value medium">46</div>
+          <div class="score-bar">
+            <div class="score-bar-fill medium" style="width: 46%"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Context Nutrition Label -->
+      <div class="output-card">
+        <div class="output-card-header">
+          <div class="output-card-title">Context Nutrition Label</div>
+        </div>
+        <div class="nutrition-grid">
+          <div class="nutrition-item">
+            <span class="nutrition-label">Goal clarity</span>
+            <span class="nutrition-value risk-medium">Medium</span>
+          </div>
+          <div class="nutrition-item">
+            <span class="nutrition-label">Missing fields</span>
+            <span class="nutrition-value risk-high">5</span>
+          </div>
+          <div class="nutrition-item">
+            <span class="nutrition-label">Staleness risk</span>
+            <span class="nutrition-value risk-high">High</span>
+          </div>
+          <div class="nutrition-item">
+            <span class="nutrition-label">Privacy risk</span>
+            <span class="nutrition-value risk-medium">Medium</span>
+          </div>
+          <div class="nutrition-item">
+            <span class="nutrition-label">Irreversibility</span>
+            <span class="nutrition-value risk-high">High</span>
+          </div>
+          <div class="nutrition-item">
+            <span class="nutrition-label">Agent confusion</span>
+            <span class="nutrition-value risk-medium">37%</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- OSHA Violations -->
+      <div class="output-card">
+        <div class="output-card-header">
+          <div class="output-card-title">OSHA Violations</div>
+          <div class="output-card-count">5 found</div>
+        </div>
+        <div class="violation">
+          <div class="violation-code">V-001</div>
+          <div>
+            <div class="violation-title">Vibes instead of constraints</div>
+            <div class="violation-text">"Whatever is cheapest" conflicts with unstated comfort preferences.</div>
+          </div>
+        </div>
+        <div class="violation">
+          <div class="violation-code">V-007</div>
+          <div>
+            <div class="violation-title">Irreversible action without approval</div>
+            <div class="violation-text">Booking is financial and irreversible without approval gate.</div>
+          </div>
+        </div>
+        <div class="violation">
+          <div class="violation-code">V-014</div>
+          <div>
+            <div class="violation-title">Stale source risk</div>
+            <div class="violation-text">"Old travel preferences" may be outdated — no freshness date.</div>
+          </div>
+        </div>
+        <div class="violation">
+          <div class="violation-code">V-022</div>
+          <div>
+            <div class="violation-title">Permission ambiguity</div>
+            <div class="violation-text">Gmail and saved credit card permissions are too broad.</div>
+          </div>
+        </div>
+        <div class="violation">
+          <div class="violation-code">V-031</div>
+          <div>
+            <div class="violation-title">Missing receipt requirement</div>
+            <div class="violation-text">No receipt requirement specified — agent won't report actions taken.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Approval Queue -->
+      <div class="output-card">
+        <div class="output-card-header">
+          <div class="output-card-title">Approval Queue</div>
+          <div class="output-card-count">5 items</div>
+        </div>
+        <div class="approval-item">
+          <div class="approval-number">01</div>
+          <div class="approval-text">What is your maximum budget for this trip?</div>
+        </div>
+        <div class="approval-item">
+          <div class="approval-number">02</div>
+          <div class="approval-text">Can the agent book directly, or should it only recommend options?</div>
+        </div>
+        <div class="approval-item">
+          <div class="approval-number">03</div>
+          <div class="approval-text">Are non-refundable options acceptable?</div>
+        </div>
+        <div class="approval-item">
+          <div class="approval-number">04</div>
+          <div class="approval-text">Which airport should the agent prioritize?</div>
+        </div>
+        <div class="approval-item">
+          <div class="approval-number">05</div>
+          <div class="approval-text">May the agent share personal information with travel vendors?</div>
+        </div>
+      </div>
+
+      <!-- Agent Work Order -->
+      <div class="output-card">
+        <div class="output-card-header">
+          <div class="output-card-title">Agent Work Order</div>
+        </div>
+        <pre class="work-order"><span class="wo-bracket">{</span>
+  <span class="wo-key">"goal"</span>: <span class="wo-string">"Research travel options for a weekend trip"</span>,
+  <span class="wo-key">"allowed_actions"</span>: [<span class="wo-string">"search"</span>, <span class="wo-string">"compare"</span>, <span class="wo-string">"summarize"</span>],
+  <span class="wo-key">"blocked_actions"</span>: [<span class="wo-string">"purchase"</span>, <span class="wo-string">"book"</span>, <span class="wo-string">"send_personal_info"</span>],
+  <span class="wo-key">"requires_approval"</span>: [<span class="wo-string">"payment"</span>, <span class="wo-string">"booking"</span>],
+  <span class="wo-key">"missing_info"</span>: [<span class="wo-string">"budget"</span>, <span class="wo-string">"exact dates"</span>, <span class="wo-string">"airport"</span>],
+  <span class="wo-key">"success_criteria"</span>: [<span class="wo-string">"3 viable options"</span>, <span class="wo-string">"prices cited"</span>],
+  <span class="wo-key">"receipt_required"</span>: <span class="wo-string">true</span>
+<span class="wo-bracket">}</span></pre>
+      </div>
+
+      <!-- Receipt Template -->
+      <div class="output-card">
+        <div class="output-card-header">
+          <div class="output-card-title">Required Agent Receipt</div>
+        </div>
+        <div class="approval-item">
+          <div class="approval-number">□</div>
+          <div class="approval-text">Actions taken</div>
+        </div>
+        <div class="approval-item">
+          <div class="approval-number">□</div>
+          <div class="approval-text">Sources checked</div>
+        </div>
+        <div class="approval-item">
+          <div class="approval-number">□</div>
+          <div class="approval-text">Decisions made vs. deferred</div>
+        </div>
+        <div class="approval-item">
+          <div class="approval-number">□</div>
+          <div class="approval-text">Approvals requested</div>
+        </div>
+        <div class="approval-item">
+          <div class="approval-number">□</div>
+          <div class="approval-text">Money spent</div>
+        </div>
+        <div class="approval-item">
+          <div class="approval-number">□</div>
+          <div class="approval-text">Files changed</div>
+        </div>
+        <div class="approval-item">
+          <div class="approval-number">□</div>
+          <div class="approval-text">Remaining uncertainty</div>
+        </div>
+      </div>
+
+    </section>
+  </main>
+
+</body>
+</html>
