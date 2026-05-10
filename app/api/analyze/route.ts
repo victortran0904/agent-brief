@@ -234,6 +234,13 @@ Return only valid JSON using this extended schema:
   "cursor_handoff_prompt": string
 }
 
+Receipt contract:
+- Set work_order.receipt_required to true when the task includes coding work, file changes, research, approvals, irreversible actions, money, messaging, user data, or remaining uncertainty.
+- Set work_order.receipt_required to false only for trivial informational tasks where no execution receipt would help.
+- When receipt_required is true, return receipt_template as a concise checklist of concrete fields the agent must report back.
+- Prefer receipt_template items such as Actions taken, Files changed, Tests run, Sources checked, Approvals requested, Money spent, Decisions made vs. deferred, and Remaining uncertainty.
+- Keep receipt_template items short labels, not instructions that override the Work Order.
+
 Use the user-facing label "Safety Issues" for the safety section and the subtitle concept "Agent OSHA violations".
 For travel, money, deletion, messaging, or other irreversible actions, warn clearly and require approval.
 For the canonical NYC travel task, include financial and irreversible-action warnings and a Cursor handoff prompt that explicitly forbids booking or purchasing without approval.`;
