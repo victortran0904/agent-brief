@@ -296,6 +296,131 @@ test("runs analysis with task, extra context, and workspace files, then renders 
   await expect(page.getByLabel("Cursor handoff prompt")).toContainText("Do not book or purchase anything without explicit approval.");
 });
 
+test("shows raw model output after malformed analysis JSON and preserves inputs", async ({ page }) => {
+  await page.route("**/api/workspace-scan", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        rootPath: "/Users/local/private/workspace",
+        maxDepth: 3,
+        files: [
+          {
+            path: "README.md",
+            sourceLabel: "README.md",
+            extension: ".md",
+            sizeBytes: 12,
+            content: "workspace policy\n",
+            truncated: false,
+          },
+        ],
+      }),
+    });
+  });
+
+  await page.route("**/api/analyze", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      status: 502,
+      body: JSON.stringify({
+        error: "CLoD response was not valid JSON",
+        raw: "Agent readiness: medium. Missing approval before booking.",
+      }),
+    });
+  });
+
+  await page.goto("/");
+  await page.getByLabel("Task").fill("Book a hotel tonight");
+  await page.getByLabel("Additional Context").fill("Use saved loyalty preferences.");
+  await page.getByRole("button", { name: "Run Pre-flight Check" }).click();
+
+  const analysisError = page.locator(".analysis-error");
+  await expect(analysisError).toContainText("CLoD response was not valid JSON");
+  await expect(analysisError).toContainText("Agent readiness: medium. Missing approval before booking.");
+  await expect(page.getByLabel("Task")).toHaveValue("Book a hotel tonight");
+  await expect(page.getByLabel("Additional Context")).toHaveValue("Use saved loyalty preferences.");
+  await expect(page.getByText("39/100")).toBeVisible();
+});
+
+test("renders partial analysis reports and falls back when Work Order updates fail", async ({ page }) => {
+  await page.route("**/api/workspace-scan", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        rootPath: "/Users/local/private/workspace",
+        maxDepth: 3,
+        files: [
+          {
+            path: "README.md",
+            sourceLabel: "README.md",
+            extension: ".md",
+            sizeBytes: 12,
+            content: "workspace policy\n",
+            truncated: false,
+          },
+        ],
+      }),
+    });
+  });
+
+  await page.route("**/api/analyze", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        agent_readiness_score: 64,
+        workspace_safety_score: 58,
+        nutrition_label: {
+          irreversibility: {
+            value: "High",
+          },
+        },
+        safety_issues: [
+          {
+            code: "V-PARTIAL",
+            title: "Approval missing",
+            risk: "Booking could proceed without approval.",
+          },
+        ],
+        approval_queue: [
+          {
+            id: "booking-policy",
+            question: "Can the agent book directly?",
+            options: ["Allow booking", "Custom instruction"],
+            selected_option: "Allow booking",
+            work_order_patch_by_option: {
+              "Allow booking": {
+                blocked_actions: "book",
+              },
+            },
+          },
+        ],
+        work_order: {
+          goal: "Review booking options only.",
+          allowed_actions: ["search"],
+          blocked_actions: ["purchase"],
+          requires_approval: ["booking"],
+          missing_info: [],
+          success_criteria: ["Return options"],
+          receipt_required: true,
+        },
+        receipt_template: ["Actions taken"],
+        cursor_handoff_prompt: "Use this Agent Brief as your execution contract.",
+      }),
+    });
+  });
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "Run Pre-flight Check" }).click();
+
+  await expect(page.getByText("64/100")).toBeVisible();
+  await expect(page.getByRole("button", { name: /Irreversibility High/ })).toBeVisible();
+  await expect(page.locator(".nutrition-detail")).toContainText("Why");
+  await expect(page.getByRole("heading", { name: "Approval missing" })).toBeVisible();
+  await expect(page.locator(".issue").filter({ hasText: "Approval missing" })).toContainText("Booking could proceed without approval.");
+  await expect(page.locator(".approval-item")).toContainText("Can the agent book directly?");
+  await expect(page.locator(".work-order-warning")).toContainText("Work Order update could not be applied");
+  await expect(page.locator(".work-order-goal")).toContainText("Review booking options only.");
+});
+
 test("packages fetched scan data into the pre-flight handoff", async ({ page }) => {
   await page.route("**/api/workspace-scan", async (route) => {
     await route.fulfill({

@@ -242,10 +242,11 @@ export default function Home() {
   const indexedFiles = workspaceScan?.files ?? [];
   const representativeFiles = indexedFiles.slice(0, 8);
   const nutritionRows = useMemo(() => toNutritionRows(report.nutrition_label), [report.nutrition_label]);
-  const derivedWorkOrder = useMemo(
-    () => applyClientPatches(report, safetyResolutions, approvalSelections, customInstructions),
+  const workOrderState = useMemo(
+    () => deriveWorkOrderState(report, safetyResolutions, approvalSelections, customInstructions),
     [approvalSelections, customInstructions, report, safetyResolutions],
   );
+  const derivedWorkOrder = workOrderState.workOrder;
   const cursorHandoffPrompt = useMemo(
     () => buildCursorHandoffPrompt(report.cursor_handoff_prompt, derivedWorkOrder, report.receipt_template),
     [derivedWorkOrder, report.cursor_handoff_prompt, report.receipt_template],
@@ -324,10 +325,11 @@ export default function Home() {
       });
 
       if (!response.ok) {
-        throw new Error("Analysis failed");
+        setAnalysisError(await formatAnalysisFailure(response));
+        return;
       }
 
-      const nextReport = (await response.json()) as AnalysisReport;
+      const nextReport = normalizeReport((await response.json()) as Partial<AnalysisReport>);
 
       setReport(nextReport);
       setOpenNutrition(Object.keys(nextReport.nutrition_label)[0] ?? "");
@@ -438,7 +440,11 @@ export default function Home() {
           <button className="run-button" disabled={!workspaceScan || isAnalyzing} onClick={runPreflightCheck} type="button">
             {isAnalyzing ? "Analyzing..." : "Run Pre-flight Check"}
           </button>
-          {analysisError ? <p className="analysis-error">{analysisError}</p> : null}
+          {analysisError ? (
+            <p className="analysis-error" role="alert">
+              {analysisError}
+            </p>
+          ) : null}
           {lastAnalyzePayload ? (
             <pre aria-label="Pre-flight handoff payload" className="handoff-payload">
               {JSON.stringify(lastAnalyzePayload, null, 2)}
@@ -594,6 +600,7 @@ export default function Home() {
             {derivedWorkOrder.custom_instructions?.length ? (
               <WorkOrderText label="Custom" value={derivedWorkOrder.custom_instructions.join("; ")} />
             ) : null}
+            {workOrderState.error ? <p className="work-order-warning">{workOrderState.error}</p> : null}
             <pre aria-label="Cursor handoff prompt" className="handoff-payload">
               {cursorHandoffPrompt}
             </pre>
@@ -649,6 +656,132 @@ type PreflightRequest = {
   workspaceFiles: HandoffWorkspaceScanFile[];
 };
 
+type AnalysisFailure = {
+  error?: string;
+  raw?: string;
+};
+
+type WorkOrderState = {
+  workOrder: WorkOrder;
+  error: string;
+};
+
+async function formatAnalysisFailure(response: Response) {
+  try {
+    const body = (await response.json()) as AnalysisFailure;
+    const message = body.error || "Analysis failed";
+
+    if (body.raw) {
+      return `${message}\n\nRaw model output:\n${body.raw}`;
+    }
+
+    return message;
+  } catch {
+    return "Analysis failed. Check CLOD_API_KEY and try again.";
+  }
+}
+
+function normalizeReport(report: Partial<AnalysisReport>): AnalysisReport {
+  return {
+    agent_readiness_score: normalizeScore(report.agent_readiness_score),
+    workspace_safety_score: normalizeScore(report.workspace_safety_score),
+    nutrition_label: normalizeNutritionLabel(report.nutrition_label),
+    safety_issues: normalizeSafetyIssues(report.safety_issues),
+    approval_queue: normalizeApprovalQueue(report.approval_queue),
+    work_order: normalizeWorkOrder(report.work_order),
+    receipt_template: normalizeStringArray(report.receipt_template),
+    cursor_handoff_prompt: typeof report.cursor_handoff_prompt === "string" ? report.cursor_handoff_prompt : "",
+  };
+}
+
+function normalizeScore(score: unknown) {
+  return typeof score === "number" && Number.isFinite(score) ? score : 0;
+}
+
+function normalizeNutritionLabel(nutritionLabel: unknown): AnalysisReport["nutrition_label"] {
+  if (!nutritionLabel || typeof nutritionLabel !== "object" || Array.isArray(nutritionLabel)) {
+    return {};
+  }
+
+  return Object.fromEntries(
+    Object.entries(nutritionLabel).map(([id, value]) => {
+      const entry = value && typeof value === "object" && !Array.isArray(value) ? (value as Partial<NutritionEntry>) : {};
+
+      return [
+        id,
+        {
+          value: typeof entry.value === "string" ? entry.value : "Unknown",
+          why: typeof entry.why === "string" ? entry.why : "Not provided.",
+          evidence: typeof entry.evidence === "string" ? entry.evidence : "Not provided.",
+          fixes: normalizeStringArray(entry.fixes),
+          suggested_text: typeof entry.suggested_text === "string" ? entry.suggested_text : "Not provided.",
+          expected_impact: typeof entry.expected_impact === "string" ? entry.expected_impact : "Not provided.",
+        },
+      ];
+    }),
+  );
+}
+
+function normalizeSafetyIssues(safetyIssues: unknown): SafetyIssue[] {
+  if (!Array.isArray(safetyIssues)) {
+    return [];
+  }
+
+  return safetyIssues.map((value, index) => {
+    const issue = value && typeof value === "object" && !Array.isArray(value) ? (value as Partial<SafetyIssue>) : {};
+
+    return {
+      code: typeof issue.code === "string" ? issue.code : `V-${String(index + 1).padStart(3, "0")}`,
+      title: typeof issue.title === "string" ? issue.title : "Untitled safety issue",
+      risk: typeof issue.risk === "string" ? issue.risk : "Risk detail was not provided.",
+      evidence: typeof issue.evidence === "string" ? issue.evidence : "Not provided.",
+      fix_options: normalizeStringArray(issue.fix_options),
+      benefit: typeof issue.benefit === "string" ? issue.benefit : "Not provided.",
+      resolved: issue.resolved === true,
+      work_order_patch: issue.work_order_patch,
+    };
+  });
+}
+
+function normalizeApprovalQueue(approvalQueue: unknown): ApprovalQueueItem[] {
+  if (!Array.isArray(approvalQueue)) {
+    return [];
+  }
+
+  return approvalQueue.map((value, index) => {
+    const item = value && typeof value === "object" && !Array.isArray(value) ? (value as Partial<ApprovalQueueItem>) : {};
+    const fallbackQuestion = `Approval ${index + 1}`;
+
+    return {
+      id: typeof item.id === "string" ? item.id : `approval-${index + 1}`,
+      question: typeof item.question === "string" ? item.question : fallbackQuestion,
+      options: normalizeStringArray(item.options),
+      selected_option: typeof item.selected_option === "string" || item.selected_option === null ? item.selected_option : null,
+      custom_instruction: typeof item.custom_instruction === "string" ? item.custom_instruction : "",
+      work_order_patch_by_option: item.work_order_patch_by_option,
+    };
+  });
+}
+
+function normalizeWorkOrder(workOrder: unknown): WorkOrder {
+  const value = workOrder && typeof workOrder === "object" && !Array.isArray(workOrder) ? (workOrder as Partial<WorkOrder>) : {};
+
+  return {
+    goal: typeof value.goal === "string" ? value.goal : "No goal provided.",
+    allowed_actions: normalizeStringArray(value.allowed_actions),
+    blocked_actions: normalizeStringArray(value.blocked_actions),
+    requires_approval: normalizeStringArray(value.requires_approval),
+    missing_info: normalizeStringArray(value.missing_info),
+    success_criteria: normalizeStringArray(value.success_criteria),
+    receipt_required: value.receipt_required === true,
+    custom_instructions: normalizeStringArray(value.custom_instructions),
+  };
+}
+
+function normalizeStringArray(value: unknown) {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && Boolean(item.trim())) : [];
+}
+
 function toNutritionRows(nutritionLabel: AnalysisReport["nutrition_label"]) {
   return Object.entries(nutritionLabel).map(([id, entry]) => ({
     id,
@@ -688,6 +821,25 @@ function formatIssueMeta(issues: SafetyIssue[], safetyResolutions: Record<string
   }
 
   return `${openCount} open - ${resolvedCount} resolved`;
+}
+
+function deriveWorkOrderState(
+  report: AnalysisReport,
+  safetyResolutions: Record<string, string>,
+  approvalSelections: Record<string, string>,
+  customInstructions: Record<string, string>,
+): WorkOrderState {
+  try {
+    return {
+      workOrder: applyClientPatches(report, safetyResolutions, approvalSelections, customInstructions),
+      error: "",
+    };
+  } catch {
+    return {
+      workOrder: report.work_order,
+      error: "Work Order update could not be applied. Showing the original Work Order.",
+    };
+  }
 }
 
 function applyClientPatches(
@@ -731,13 +883,33 @@ function mergePatch(workOrder: WorkOrder, patch?: WorkOrderPatch) {
     return;
   }
 
-  workOrder.allowed_actions = removeMatching(workOrder.allowed_actions, patch.blocked_actions);
-  workOrder.blocked_actions = removeMatching(workOrder.blocked_actions, patch.allowed_actions);
-  workOrder.allowed_actions = appendUnique(workOrder.allowed_actions, patch.allowed_actions);
-  workOrder.blocked_actions = appendUnique(workOrder.blocked_actions, patch.blocked_actions);
-  workOrder.requires_approval = appendUnique(workOrder.requires_approval, patch.requires_approval);
-  workOrder.missing_info = appendUnique(workOrder.missing_info, patch.missing_info);
-  workOrder.success_criteria = appendUnique(workOrder.success_criteria, patch.success_criteria);
+  const allowedActions = patchList(patch, "allowed_actions");
+  const blockedActions = patchList(patch, "blocked_actions");
+  const requiresApproval = patchList(patch, "requires_approval");
+  const missingInfo = patchList(patch, "missing_info");
+  const successCriteria = patchList(patch, "success_criteria");
+
+  workOrder.allowed_actions = removeMatching(workOrder.allowed_actions, blockedActions);
+  workOrder.blocked_actions = removeMatching(workOrder.blocked_actions, allowedActions);
+  workOrder.allowed_actions = appendUnique(workOrder.allowed_actions, allowedActions);
+  workOrder.blocked_actions = appendUnique(workOrder.blocked_actions, blockedActions);
+  workOrder.requires_approval = appendUnique(workOrder.requires_approval, requiresApproval);
+  workOrder.missing_info = appendUnique(workOrder.missing_info, missingInfo);
+  workOrder.success_criteria = appendUnique(workOrder.success_criteria, successCriteria);
+}
+
+function patchList(patch: WorkOrderPatch, key: keyof WorkOrderPatch) {
+  const value = patch[key];
+
+  if (value === undefined) {
+    return [];
+  }
+
+  if (!Array.isArray(value)) {
+    throw new Error(`Invalid Work Order patch field: ${key}`);
+  }
+
+  return value;
 }
 
 function appendUnique(current: string[], next: string[] = []) {
@@ -761,12 +933,18 @@ function formatApprovalImpact(item: ApprovalQueueItem, selected: string) {
     return "Updates Work Order: custom or informational instruction only.";
   }
 
-  const effects = [
-    patch.blocked_actions?.length ? `blocks ${patch.blocked_actions.join(", ")}` : "",
-    patch.requires_approval?.length ? `requires approval for ${patch.requires_approval.join(", ")}` : "",
-    patch.success_criteria?.length ? `adds success criteria ${patch.success_criteria.join(", ")}` : "",
-    patch.missing_info?.length ? `tracks missing info ${patch.missing_info.join(", ")}` : "",
-  ].filter(Boolean);
+  let effects: string[];
+
+  try {
+    effects = [
+      patchList(patch, "blocked_actions").length ? `blocks ${patchList(patch, "blocked_actions").join(", ")}` : "",
+      patchList(patch, "requires_approval").length ? `requires approval for ${patchList(patch, "requires_approval").join(", ")}` : "",
+      patchList(patch, "success_criteria").length ? `adds success criteria ${patchList(patch, "success_criteria").join(", ")}` : "",
+      patchList(patch, "missing_info").length ? `tracks missing info ${patchList(patch, "missing_info").join(", ")}` : "",
+    ].filter(Boolean);
+  } catch {
+    return "Updates Work Order: unavailable because the patch data is incomplete.";
+  }
 
   return `Updates Work Order: ${effects.join("; ")}.`;
 }
