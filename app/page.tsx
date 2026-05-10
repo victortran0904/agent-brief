@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent, MouseEvent } from "react";
 
 type WorkspaceScanFile = {
@@ -273,6 +273,7 @@ export default function Home() {
   const [safetyResolutions, setSafetyResolutions] = useState<Record<string, string>>({});
   const [approvalSelections, setApprovalSelections] = useState<Record<string, string>>({});
   const [customInstructions, setCustomInstructions] = useState<Record<string, string>>({});
+  const analysisRequestIdRef = useRef(0);
 
   const copyLabel = copyState === "cursor" ? "Copied for Cursor" : "Copy for Cursor";
   const copyJsonLabel = copyState === "json" ? "JSON Copied" : "Copy JSON";
@@ -303,11 +304,13 @@ export default function Home() {
   );
 
   function selectPreset(preset: DemoPreset) {
+    analysisRequestIdRef.current += 1;
     setSelectedPresetId(preset.id);
     setTask(preset.task);
     setContext(preset.context);
     setAnalysisError("");
     setAnalysisStatus("");
+    setIsAnalyzing(false);
     setLastAnalyzePayload(null);
     setReport(defaultReport);
     setSafetyResolutions({});
@@ -355,6 +358,9 @@ export default function Home() {
       return;
     }
 
+    const requestId = analysisRequestIdRef.current + 1;
+    analysisRequestIdRef.current = requestId;
+    const isCurrentAnalysis = () => requestId === analysisRequestIdRef.current;
     const payload = {
       task,
       context,
@@ -377,11 +383,20 @@ export default function Home() {
       });
 
       if (!response.ok) {
-        setAnalysisError(await formatAnalysisFailure(response));
+        const message = await formatAnalysisFailure(response);
+
+        if (isCurrentAnalysis()) {
+          setAnalysisError(message);
+        }
+
         return;
       }
 
       const nextReport = await readAnalysisResponse(response, (chunk) => {
+        if (!isCurrentAnalysis()) {
+          return;
+        }
+
         if (chunk.type === "progress") {
           setAnalysisStatus(chunk.message ?? "Streaming analysis results...");
           return;
@@ -390,16 +405,24 @@ export default function Home() {
         setReport(normalizeReport(chunk.report));
       });
 
+      if (!isCurrentAnalysis()) {
+        return;
+      }
+
       setReport(nextReport);
       setOpenNutrition(Object.keys(nextReport.nutrition_label)[0] ?? "");
       setSafetyResolutions({});
       setApprovalSelections({});
       setCustomInstructions({});
     } catch (error) {
-      setAnalysisError(error instanceof Error ? error.message : "Analysis failed. Check CLOD_API_KEY and try again.");
+      if (isCurrentAnalysis()) {
+        setAnalysisError(error instanceof Error ? error.message : "Analysis failed. Check CLOD_API_KEY and try again.");
+      }
     } finally {
-      setAnalysisStatus("");
-      setIsAnalyzing(false);
+      if (isCurrentAnalysis()) {
+        setAnalysisStatus("");
+        setIsAnalyzing(false);
+      }
     }
   }
 
