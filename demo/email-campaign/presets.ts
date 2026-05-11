@@ -40,8 +40,6 @@ export const emailCampaignDemoPresets: DemoPreset[] = [
   },
 ];
 
-export const EMAIL_HANDOFF_PRESET_IDS: readonly string[] = emailCampaignDemoPresets.map((preset) => preset.id);
-
-export function isEmailHandoffDemoPreset(presetId: string): boolean {
-  return EMAIL_HANDOFF_PRESET_IDS.includes(presetId);
-}
+/** Default Task and Additional Context shown on first load (email thin handoff scenario). */
+export const defaultPreflightTask = emailCampaignDemoPresets[0].task;
+export const defaultPreflightContext = emailCampaignDemoPresets[0].context;

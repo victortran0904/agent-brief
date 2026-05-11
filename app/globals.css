@@ -195,49 +195,6 @@ textarea {
   margin-bottom: 24px;
 }
 
-.demo-presets {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin-bottom: 24px;
-}
-
-.preset-grid {
-  display: grid;
-  gap: 10px;
-}
-
-.preset-card {
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid var(--color-border);
-  border-radius: 12px;
-  color: var(--color-fog);
-  cursor: pointer;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 12px 14px;
-  text-align: left;
-}
-
-.preset-card:hover,
-.preset-card.selected {
-  border-color: var(--color-blue);
-  color: var(--color-frost);
-}
-
-.preset-card span {
-  color: var(--color-white);
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.preset-card small {
-  color: inherit;
-  font-size: 12px;
-  line-height: 1.45;
-}
-
 label,
 .field-label {
   color: var(--color-frost);

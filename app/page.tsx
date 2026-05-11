@@ -1,7 +1,6 @@
 "use client";
 
-import { emailCampaignDemoPresets, isEmailHandoffDemoPreset } from "../demo/email-campaign/presets";
-import type { DemoPreset } from "../lib/demo-preset";
+import { defaultPreflightContext, defaultPreflightTask } from "../demo/email-campaign/presets";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, DragEvent, KeyboardEvent, MouseEvent, ReactNode } from "react";
 
@@ -119,10 +118,19 @@ async function collectFilesFromFileSystemEntry(
     return [];
   }
 
+  const prefixDepth = pathPrefix.split("/").filter(Boolean).length;
   const reader = directory.createReader();
   const children = await readDirectoryEntries(reader);
   const nextPrefix = `${pathPrefix}${directory.name}/`;
-  const nested = await Promise.all(children.map((child) => collectFilesFromFileSystemEntry(child, nextPrefix)));
+  const nested = await Promise.all(
+    children.map((child) => {
+      if (child.isDirectory && prefixDepth >= WORKSPACE_UPLOAD_MAX_DEPTH - 1) {
+        return Promise.resolve([]);
+      }
+
+      return collectFilesFromFileSystemEntry(child, nextPrefix);
+    }),
+  );
 
   return nested.flat();
 }
@@ -135,7 +143,9 @@ async function collectFromDataTransferItem(item: DataTransferItem): Promise<{ fi
       return collectFilesFromFileSystemEntry(entry, "");
     }
 
-    return collectFilesFromFileSystemEntry(entry, `${(entry as FileSystemDirectoryEntry).name}/`);
+    // Root directory name is added inside `collectFilesFromFileSystemEntry`; prefix must stay empty here
+    // so paths are `Folder/file.txt`, not `Folder/Folder/file.txt`.
+    return collectFilesFromFileSystemEntry(entry, "");
   }
 
   const fallback = item.getAsFile();
@@ -229,27 +239,6 @@ type ReceiptState = {
   items: string[];
   usedFallback: boolean;
 };
-
-const demoPresets: DemoPreset[] = [
-  {
-    id: "nyc-travel",
-    title: "NYC Travel",
-    summary: "Budget gaps, stale preferences, payment approval, Safety Issues, and Cursor handoff.",
-    task: "Plan my NYC trip next weekend and book whatever is cheapest.",
-    context:
-      "I have old travel preferences, Gmail access, and a credit card saved in Chrome. I do not know my budget yet. Treat old preferences as stale unless confirmed, do not share personal details with vendors without asking, and require approval before booking or payment.",
-  },
-  {
-    id: "code-refactor",
-    title: "Code Refactor",
-    summary: "Workspace readiness, ambiguous source of truth, success criteria, and Work Order updates.",
-    task:
-      "Refactor the authentication module so it is easier for Cursor agents to maintain, but avoid changing user-visible login behavior.",
-    context:
-      "The source of truth is unclear between README guidance, inline comments, and an older architecture note. The workspace may have uncommitted edits. Success criteria are ambiguous: I want better structure, focused tests, and a Work Order update before implementation if the agent finds conflicting ownership or hidden dependencies.",
-  },
-  ...emailCampaignDemoPresets,
-];
 
 const fallbackReceiptItems = [
   "Actions taken",
@@ -577,9 +566,8 @@ async function ingestWorkspaceBrowserFiles(
 }
 
 export default function Home() {
-  const [selectedPresetId, setSelectedPresetId] = useState(demoPresets[0].id);
-  const [task, setTask] = useState(demoPresets[0].task);
-  const [context, setContext] = useState(demoPresets[0].context);
+  const [task, setTask] = useState(defaultPreflightTask);
+  const [context, setContext] = useState(defaultPreflightContext);
   const [openNutrition, setOpenNutrition] = useState("staleness_risk");
   const [copyState, setCopyState] = useState<"idle" | "cursor" | "json">("idle");
   const [copyNotice, setCopyNotice] = useState<string | null>(null);
@@ -587,6 +575,8 @@ export default function Home() {
   const [showReportPanel, setShowReportPanel] = useState(false);
   const [workspaceScan, setWorkspaceScan] = useState<WorkspaceScanResult | null>(null);
   const [uploadedWorkspaceFiles, setUploadedWorkspaceFiles] = useState<WorkspaceScanFile[]>([]);
+  const uploadedWorkspaceFilesRef = useRef<WorkspaceScanFile[]>([]);
+  uploadedWorkspaceFilesRef.current = uploadedWorkspaceFiles;
   const [uploadError, setUploadError] = useState("");
   const [scanError, setScanError] = useState("");
   const workspaceFileInputRef = useRef<HTMLInputElement>(null);
@@ -680,11 +670,8 @@ export default function Home() {
     [cursorHandoffPrompt, derivedWorkOrder, receiptState, report],
   );
 
-  function selectPreset(preset: DemoPreset) {
+  function invalidateInFlightAnalysis() {
     analysisRequestIdRef.current += 1;
-    setSelectedPresetId(preset.id);
-    setTask(preset.task);
-    setContext(preset.context);
     setAnalysisError("");
     setAnalysisStatus("");
     setIsAnalyzing(false);
@@ -748,7 +735,7 @@ export default function Home() {
       return { file, relativePath };
     });
 
-    const { added, errors } = await ingestWorkspaceBrowserFiles(picks, uploadedWorkspaceFiles);
+    const { added, errors } = await ingestWorkspaceBrowserFiles(picks, uploadedWorkspaceFilesRef.current);
 
     if (added.length) {
       setUploadedWorkspaceFiles((current) => [...current, ...added]);
@@ -789,20 +776,24 @@ export default function Home() {
       return;
     }
 
-    const picksNested = await Promise.all(Array.from(items).map((item) => collectFromDataTransferItem(item)));
-    const picks = picksNested.flat();
+    try {
+      const picksNested = await Promise.all(Array.from(items).map((item) => collectFromDataTransferItem(item)));
+      const picks = picksNested.flat();
 
-    if (!picks.length) {
-      return;
+      if (!picks.length) {
+        return;
+      }
+
+      const { added, errors } = await ingestWorkspaceBrowserFiles(picks, uploadedWorkspaceFilesRef.current);
+
+      if (added.length) {
+        setUploadedWorkspaceFiles((current) => [...current, ...added]);
+      }
+
+      setUploadError(errors.length ? errors.join(" ") : "");
+    } catch (err) {
+      setUploadError(`Drop failed: ${err instanceof Error ? err.message : String(err)}`);
     }
-
-    const { added, errors } = await ingestWorkspaceBrowserFiles(picks, uploadedWorkspaceFiles);
-
-    if (added.length) {
-      setUploadedWorkspaceFiles((current) => [...current, ...added]);
-    }
-
-    setUploadError(errors.length ? errors.join(" ") : "");
   }
 
   function removeUploadedWorkspaceFile(storedPath: string) {
@@ -1161,25 +1152,6 @@ export default function Home() {
             <p>Describe what the agent should do. Agent Brief audits the task before the agent starts.</p>
           </header>
 
-          <section className="demo-presets" aria-label="Demo presets">
-            <div className="field-label">Demo Presets</div>
-            <div className="preset-grid">
-              {demoPresets.map((preset) => (
-                <button
-                  aria-label={`${preset.title} demo preset`}
-                  aria-pressed={selectedPresetId === preset.id}
-                  className={selectedPresetId === preset.id ? "preset-card selected" : "preset-card"}
-                  key={preset.id}
-                  onClick={() => selectPreset(preset)}
-                  type="button"
-                >
-                  <span>{preset.title}</span>
-                  <small>{preset.summary}</small>
-                </button>
-              ))}
-            </div>
-          </section>
-
           <div className="field">
             <label htmlFor="task">Task</label>
             <textarea
@@ -1187,7 +1159,9 @@ export default function Home() {
               id="task"
               ref={taskTextareaRef}
               onChange={(event) => {
-                setSelectedPresetId("");
+                if (isAnalyzing) {
+                  invalidateInFlightAnalysis();
+                }
                 setTask(event.target.value);
               }}
               rows={4}
@@ -1203,7 +1177,9 @@ export default function Home() {
               id="context"
               ref={contextTextareaRef}
               onChange={(event) => {
-                setSelectedPresetId("");
+                if (isAnalyzing) {
+                  invalidateInFlightAnalysis();
+                }
                 setContext(event.target.value);
               }}
               rows={5}
@@ -1218,15 +1194,13 @@ export default function Home() {
                 ? `${scanError}. Add files below to supply demo context, or fix the project scan.`
                 : "Local scan preview from safe text, config, and documentation sources. Drag a folder or add files for extra demo context."}
             </p>
-            {isEmailHandoffDemoPreset(selectedPresetId) ? (
-              <div className="workspace-demo-callout" role="note">
-                <p>
-                  Email demo: drag <span className="workspace-path-hint">demo/email-campaign/handoff-sparse</span> or{" "}
-                  <span className="workspace-path-hint">demo/email-campaign/handoff-rich</span> onto the drop zone (folder
-                  uploads keep nested paths). Clear uploads before switching between the two email presets.
-                </p>
-              </div>
-            ) : null}
+            <div className="workspace-demo-callout" role="note">
+              <p>
+                Drag <span className="workspace-path-hint">demo/email-campaign/handoff-sparse</span> or{" "}
+                <span className="workspace-path-hint">demo/email-campaign/handoff-rich</span> onto the drop zone (folder
+                uploads keep nested paths). Clear uploads before switching handoff folders.
+              </p>
+            </div>
             <div
               className={`workspace-drop-zone${workspaceDropDepth > 0 ? " workspace-drop-zone--active" : ""}`}
               onDragEnter={handleWorkspaceDragEnter}
