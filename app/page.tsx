@@ -1,11 +1,13 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { ChangeEvent, KeyboardEvent, MouseEvent } from "react";
+import type { ChangeEvent, KeyboardEvent, MouseEvent, ReactNode } from "react";
 
 /** Matches server-side workspace preview limit (`lib/workspace-scanner.ts`). */
 const WORKSPACE_FILE_MAX_BYTES = 200_000;
 const BINARY_SAMPLE_BYTES = 512;
+
+const SAFETY_CUSTOM_STARTERS = ["Do not...", "Ask before...", "Only use...", "Limit to..."];
 
 type WorkspaceScanFile = {
   path: string;
@@ -51,6 +53,8 @@ type SafetyIssue = {
   benefit: string;
   resolved: boolean;
   work_order_patch?: WorkOrderPatch;
+  /** When set, this issue is a nested follow-up under another issue code. */
+  parent_code?: string;
 };
 
 type ApprovalQueueItem = {
@@ -393,6 +397,10 @@ export default function Home() {
   const [analysisStatus, setAnalysisStatus] = useState("");
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [safetyResolutions, setSafetyResolutions] = useState<Record<string, string>>({});
+  const [safetyCustomDraft, setSafetyCustomDraft] = useState<Record<string, string>>({});
+  const [safetyCustomSubmitted, setSafetyCustomSubmitted] = useState<Record<string, string>>({});
+  const [safetyRecheckingCode, setSafetyRecheckingCode] = useState<string | null>(null);
+  const [safetyRecheckError, setSafetyRecheckError] = useState<Record<string, string>>({});
   const [approvalSelections, setApprovalSelections] = useState<Record<string, string>>({});
   const [customInstructions, setCustomInstructions] = useState<Record<string, string>>({});
   const analysisRequestIdRef = useRef(0);
@@ -409,13 +417,19 @@ export default function Home() {
   const canRunPreflight = Boolean(mergedWorkspaceScan) && !isAnalyzing;
   const nutritionRows = useMemo(() => toNutritionRows(report.nutrition_label), [report.nutrition_label]);
   const workOrderState = useMemo(
-    () => deriveWorkOrderState(report, safetyResolutions, approvalSelections, customInstructions),
-    [approvalSelections, customInstructions, report, safetyResolutions],
+    () =>
+      deriveWorkOrderState(report, safetyResolutions, approvalSelections, customInstructions, safetyCustomSubmitted),
+    [approvalSelections, customInstructions, report, safetyCustomSubmitted, safetyResolutions],
+  );
+
+  const handoffBlocked = useMemo(
+    () => safetyIssuesBlockHandoff(report.safety_issues, safetyResolutions, safetyCustomSubmitted),
+    [report.safety_issues, safetyCustomSubmitted, safetyResolutions],
   );
   const derivedWorkOrder = workOrderState.workOrder;
   const baselineWorkOrder = useMemo(() => {
     try {
-      return applyClientPatches(report, {}, {}, {});
+      return applyClientPatches(report, {}, {}, {}, {});
     } catch {
       return report.work_order;
     }
@@ -465,6 +479,10 @@ export default function Home() {
     setShowReportPanel(false);
     setReport(defaultReport);
     setSafetyResolutions({});
+    setSafetyCustomDraft({});
+    setSafetyCustomSubmitted({});
+    setSafetyRecheckError({});
+    setSafetyRecheckingCode(null);
     setApprovalSelections({});
     setCustomInstructions({});
   }
@@ -530,10 +548,6 @@ export default function Home() {
     setUploadError(errors.length ? errors.join(" ") : "");
   }
 
-  function removeUploadedWorkspaceFile(path: string) {
-    setUploadedWorkspaceFiles((current) => current.filter((file) => file.path !== path));
-  }
-
   function flashCopy(kind: "cursor" | "json") {
     setCopyState(kind);
     window.setTimeout(() => setCopyState("idle"), 1200);
@@ -595,6 +609,10 @@ export default function Home() {
       setReport(nextReport);
       setOpenNutrition(Object.keys(nextReport.nutrition_label)[0] ?? "");
       setSafetyResolutions({});
+      setSafetyCustomDraft({});
+      setSafetyCustomSubmitted({});
+      setSafetyRecheckError({});
+      setSafetyRecheckingCode(null);
       setApprovalSelections({});
       setCustomInstructions({});
       setShowReportPanel(true);
@@ -649,6 +667,198 @@ export default function Home() {
       const direction = event.key === "ArrowLeft" ? -4 : 4;
       return Math.min(72, Math.max(32, width + direction));
     });
+  }
+
+  async function submitSafetyRecheck(issueCode: string) {
+    const instruction = safetyCustomDraft[issueCode]?.trim();
+
+    if (!instruction || !mergedWorkspaceScan) {
+      return;
+    }
+
+    setSafetyRecheckingCode(issueCode);
+    setSafetyRecheckError((current) => ({ ...current, [issueCode]: "" }));
+
+    try {
+      const provisionalSubmitted = { ...safetyCustomSubmitted, [issueCode]: instruction };
+      const workOrderPayload = applyClientPatches(
+        report,
+        safetyResolutions,
+        approvalSelections,
+        customInstructions,
+        provisionalSubmitted,
+      );
+
+      const response = await fetch("/api/safety-recheck", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          task,
+          context,
+          workspaceFiles: packageWorkspaceScan(mergedWorkspaceScan).files,
+          workOrder: workOrderPayload,
+          originatingIssueCode: issueCode,
+          customInstruction: instruction,
+          safetyIssuesSnapshot: report.safety_issues,
+        }),
+      });
+
+      const data = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        safety_issues?: unknown;
+        agent_readiness_score?: number;
+        workspace_safety_score?: number;
+      };
+
+      if (!response.ok) {
+        throw new Error(typeof data.error === "string" ? data.error : "Safety re-check failed");
+      }
+
+      setReport((current) => ({
+        ...current,
+        safety_issues: normalizeSafetyIssues(data.safety_issues ?? []),
+        ...(typeof data.agent_readiness_score === "number" ? { agent_readiness_score: data.agent_readiness_score } : {}),
+        ...(typeof data.workspace_safety_score === "number" ? { workspace_safety_score: data.workspace_safety_score } : {}),
+      }));
+      setSafetyCustomSubmitted((previous) => ({ ...previous, [issueCode]: instruction }));
+    } catch (error) {
+      setSafetyRecheckError((previous) => ({
+        ...previous,
+        [issueCode]: error instanceof Error ? error.message : "Safety re-check failed",
+      }));
+    } finally {
+      setSafetyRecheckingCode(null);
+    }
+  }
+
+  function renderSafetyIssueCluster(issue: SafetyIssue): ReactNode {
+    const badge = issueStatusBadge(
+      safetyRecheckingCode,
+      issue,
+      report.safety_issues,
+      safetyResolutions,
+      safetyCustomSubmitted,
+    );
+    const selectedResolution = safetyResolutions[issue.code];
+    const isCustom = Boolean(selectedResolution?.toLowerCase().includes("custom"));
+    const draftValue = safetyCustomDraft[issue.code] ?? "";
+    const children = report.safety_issues.filter((row) => row.parent_code === issue.code);
+    const rowTone = badge === "resolved" || badge === "follow-up" ? "resolved" : "issue-open";
+
+    const titleBadge =
+      badge === "checking" ? (
+        <span className="status-badge status-badge--checking">Checking…</span>
+      ) : badge === "follow-up" ? (
+        <span className="status-badge status-badge--follow-up">Resolved with follow-up</span>
+      ) : badge === "resolved" ? (
+        <span className="resolved-badge">Resolved</span>
+      ) : (
+        <span className="open-badge">Open</span>
+      );
+
+    return (
+      <>
+        <div className={`issue ${rowTone}`}>
+          <div className="issue-code">{issue.code}</div>
+          <div className="issue-body">
+            <h3>
+              {issue.title} {titleBadge}
+            </h3>
+            <div className="issue-risk-block">
+              <div className="detail-label">Risk</div>
+              <p>{issue.risk}</p>
+            </div>
+            <div className="issue-grid">
+              <div>
+                <div className="detail-label">Evidence</div>
+                <div className="detail-text">{issue.evidence}</div>
+              </div>
+              <div>
+                <div className="detail-label">If resolved</div>
+                <div className="detail-text">{issue.benefit}</div>
+              </div>
+            </div>
+            <div className="detail-label issue-fix-label">Choose a fix</div>
+            <div className="option-row">
+              {issue.fix_options.map((option) => (
+                <button
+                  className={selectedResolution === option ? "option selected" : "option"}
+                  key={option}
+                  onClick={() =>
+                    setSafetyResolutions((current) => ({
+                      ...current,
+                      [issue.code]: option,
+                    }))
+                  }
+                  type="button"
+                >
+                  {option}
+                </button>
+              ))}
+            </div>
+            {isCustom ? (
+              <div className="safety-custom-card">
+                <div className="safety-custom-question">What constraint should the agent follow for this safety issue?</div>
+                <div aria-label="Suggested custom instruction starters" className="suggestion-chips" role="group">
+                  {SAFETY_CUSTOM_STARTERS.map((starter) => (
+                    <button
+                      className="suggestion-chip"
+                      key={starter}
+                      onClick={() =>
+                        setSafetyCustomDraft((current) => ({
+                          ...current,
+                          [issue.code]: `${current[issue.code] ?? ""}${current[issue.code]?.length ? " " : ""}${starter}`,
+                        }))
+                      }
+                      type="button"
+                    >
+                      {starter}
+                    </button>
+                  ))}
+                </div>
+                <textarea
+                  aria-label={`${issue.title} custom safety instruction`}
+                  className="safety-custom-input"
+                  onChange={(event) =>
+                    setSafetyCustomDraft((current) => ({
+                      ...current,
+                      [issue.code]: event.target.value,
+                    }))
+                  }
+                  placeholder="Describe the constraint in your own words."
+                  value={draftValue}
+                />
+                <div className="safety-custom-actions">
+                  <p className="safety-custom-helper">
+                    Custom instructions are patched into the Work Order, then checked again before Copy for Cursor.
+                  </p>
+                  <button
+                    className="safety-custom-submit"
+                    disabled={Boolean(safetyRecheckingCode) || !draftValue.trim()}
+                    onClick={() => submitSafetyRecheck(issue.code)}
+                    type="button"
+                  >
+                    {safetyRecheckingCode === issue.code ? "Checking…" : "Submit + re-check"}
+                  </button>
+                </div>
+                {safetyRecheckError[issue.code] ? (
+                  <p className="safety-recheck-error" role="alert">
+                    {safetyRecheckError[issue.code]}
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+        </div>
+        {children.map((child) => (
+          <div className="issue-nested" key={child.code}>
+            {renderSafetyIssueCluster(child)}
+          </div>
+        ))}
+      </>
+    );
   }
 
   return (
@@ -760,30 +970,23 @@ export default function Home() {
                 {uploadError}
               </p>
             ) : null}
-            <div className="file-chips" aria-label="Workspace file indicators">
-              {indexedFiles.length > 0 ? (
-                indexedFiles.map((file) => {
-                  const isUpload = file.path.startsWith("demo-upload/");
-                  return (
-                    <span className={`file-chip${isUpload ? " file-chip--upload" : ""}`} key={file.path} title={`${file.sizeBytes} bytes`}>
-                      {file.sourceLabel}
-                      {isUpload ? (
-                        <button
-                          aria-label={`Remove ${file.sourceLabel}`}
-                          className="file-chip-remove"
-                          onClick={() => removeUploadedWorkspaceFile(file.path)}
-                          type="button"
-                        >
-                          ×
-                        </button>
-                      ) : null}
-                    </span>
-                  );
-                })
-              ) : (
-                <span className="file-chip">{scanError || "Scanning workspace..."}</span>
-              )}
-            </div>
+            {!workspaceScan && !scanError && uploadedWorkspaceFiles.length === 0 ? (
+              <p className="workspace-scan-status" role="status">
+                Indexing workspace…
+              </p>
+            ) : null}
+            {uploadedWorkspaceFiles.length > 0 ? (
+              <p className="workspace-upload-summary">
+                <button
+                  className="workspace-upload-clear"
+                  onClick={() => setUploadedWorkspaceFiles([])}
+                  type="button"
+                >
+                  Clear {uploadedWorkspaceFiles.length} added file
+                  {uploadedWorkspaceFiles.length === 1 ? "" : "s"}
+                </button>
+              </p>
+            ) : null}
           </div>
 
           <button className="run-button" disabled={!canRunPreflight} onClick={runPreflightCheck} type="button">
@@ -874,54 +1077,22 @@ export default function Home() {
           </section>
 
           <section className="card">
-            <CardHeader title="Safety Issues" meta={formatIssueMeta(report.safety_issues, safetyResolutions)} />
+            <CardHeader title="Safety Issues" meta={formatIssueMeta(report.safety_issues, safetyResolutions, safetyCustomSubmitted)} />
             <p className="section-subtitle section-brand-line">
               <span className="section-brand">Agent OSHA violations</span>
             </p>
 
-            {report.safety_issues.map((issue) => {
-              const resolvedByDefault = issue.resolved;
-              const selectedResolution = safetyResolutions[issue.code];
-              const isResolved = resolvedByDefault || Boolean(selectedResolution);
+            {report.safety_issues
+              .filter((issue) => !issue.parent_code)
+              .map((issue) => {
+                const nestedCount = report.safety_issues.filter((row) => row.parent_code === issue.code).length;
 
-              return (
-                <div className={`issue ${isResolved ? "resolved" : "issue-open"}`} key={issue.code}>
-                  <div className="issue-code">{issue.code}</div>
-                  <div className="issue-body">
-                    <h3>
-                      {issue.title} {isResolved ? <span className="resolved-badge">Resolved</span> : <span className="open-badge">Open</span>}
-                    </h3>
-                    <div className="issue-risk-block">
-                      <div className="detail-label">Risk</div>
-                      <p>{issue.risk}</p>
-                    </div>
-                    <div className="issue-grid">
-                      <div>
-                        <div className="detail-label">Evidence</div>
-                        <div className="detail-text">{issue.evidence}</div>
-                      </div>
-                      <div>
-                        <div className="detail-label">If resolved</div>
-                        <div className="detail-text">{issue.benefit}</div>
-                      </div>
-                    </div>
-                    <div className="detail-label issue-fix-label">Choose a fix</div>
-                    <div className="option-row">
-                      {issue.fix_options.map((option) => (
-                        <button
-                          className={selectedResolution === option ? "option selected" : "option"}
-                          key={option}
-                          onClick={() => setSafetyResolutions((current) => ({ ...current, [issue.code]: option }))}
-                          type="button"
-                        >
-                          {option}
-                        </button>
-                      ))}
-                    </div>
+                return (
+                  <div className={`issue-cluster${nestedCount ? " issue-cluster--follow-up" : ""}`} key={issue.code}>
+                    {renderSafetyIssueCluster(issue)}
                   </div>
-                </div>
-              );
-            })}
+                );
+              })}
           </section>
 
           <section className="card">
@@ -991,13 +1162,18 @@ export default function Home() {
             ) : null}
 
             <div className="handoff-actions">
-              <button className="copy-primary" onClick={() => copyText(cursorHandoffPrompt, "cursor")} type="button">
+              <button className="copy-primary" disabled={handoffBlocked} onClick={() => copyText(cursorHandoffPrompt, "cursor")} type="button">
                 {copyLabel}
               </button>
-              <button className="copy-secondary" onClick={() => copyText(rawJson, "json")} type="button">
+              <button className="copy-secondary" disabled={handoffBlocked} onClick={() => copyText(rawJson, "json")} type="button">
                 {copyJsonLabel}
               </button>
             </div>
+            {handoffBlocked ? (
+              <p className="handoff-blocked-note" role="status">
+                Resolve every Safety Issue (including nested follow-ups) before copying.
+              </p>
+            ) : null}
             {copyNotice ? (
               <p className="copy-notice" role="status" aria-live="polite">
                 {copyNotice}
@@ -1041,6 +1217,11 @@ export default function Home() {
   );
 
   async function copyText(text: string, kind: "cursor" | "json") {
+    if (handoffBlocked) {
+      setCopyNotice("Resolve every Safety Issue (including nested follow-ups) before copying.");
+      return;
+    }
+
     if (!navigator.clipboard?.writeText) {
       setCopyNotice("Clipboard API unavailable in this context. Select the handoff text and copy manually.");
       return;
@@ -1263,6 +1444,16 @@ function normalizeNutritionLabel(nutritionLabel: unknown): AnalysisReport["nutri
   );
 }
 
+function ensureCustomInstructionOption(fixOptions: string[]): string[] {
+  const has = fixOptions.some((option) => option.toLowerCase().includes("custom instruction"));
+
+  if (has) {
+    return fixOptions;
+  }
+
+  return [...fixOptions, "Custom instruction"];
+}
+
 function normalizeSafetyIssues(safetyIssues: unknown): SafetyIssue[] {
   if (!Array.isArray(safetyIssues)) {
     return [];
@@ -1276,10 +1467,11 @@ function normalizeSafetyIssues(safetyIssues: unknown): SafetyIssue[] {
       title: typeof issue.title === "string" ? issue.title : "Untitled safety issue",
       risk: typeof issue.risk === "string" ? issue.risk : "Risk detail was not provided.",
       evidence: typeof issue.evidence === "string" ? issue.evidence : "Not provided.",
-      fix_options: normalizeStringArray(issue.fix_options),
+      fix_options: ensureCustomInstructionOption(normalizeStringArray(issue.fix_options)),
       benefit: typeof issue.benefit === "string" ? issue.benefit : "Not provided.",
       resolved: issue.resolved === true,
       work_order_patch: issue.work_order_patch,
+      parent_code: typeof issue.parent_code === "string" ? issue.parent_code : undefined,
     };
   });
 }
@@ -1411,15 +1603,21 @@ function riskTone(value: string) {
   return "low";
 }
 
-function formatIssueMeta(issues: SafetyIssue[], safetyResolutions: Record<string, string>) {
-  const resolvedCount = issues.filter((issue) => issue.resolved || safetyResolutions[issue.code]).length;
+function formatIssueMeta(
+  issues: SafetyIssue[],
+  safetyResolutions: Record<string, string>,
+  safetyCustomSubmitted: Record<string, string>,
+) {
+  const resolvedCount = issues.filter((issue) =>
+    isSafetyIssueSubtreeComplete(issue, issues, safetyResolutions, safetyCustomSubmitted),
+  ).length;
   const openCount = issues.length - resolvedCount;
 
   if (resolvedCount === 0) {
     return `${openCount} open`;
   }
 
-  return `${openCount} open - ${resolvedCount} resolved`;
+  return `${openCount} open · ${resolvedCount} resolved`;
 }
 
 function deriveWorkOrderState(
@@ -1427,10 +1625,17 @@ function deriveWorkOrderState(
   safetyResolutions: Record<string, string>,
   approvalSelections: Record<string, string>,
   customInstructions: Record<string, string>,
+  safetyCustomSubmitted: Record<string, string>,
 ): WorkOrderState {
   try {
     return {
-      workOrder: applyClientPatches(report, safetyResolutions, approvalSelections, customInstructions),
+      workOrder: applyClientPatches(
+        report,
+        safetyResolutions,
+        approvalSelections,
+        customInstructions,
+        safetyCustomSubmitted,
+      ),
       error: "",
     };
   } catch {
@@ -1446,6 +1651,7 @@ function applyClientPatches(
   safetyResolutions: Record<string, string>,
   approvalSelections: Record<string, string>,
   customInstructions: Record<string, string>,
+  safetyCustomSubmitted: Record<string, string>,
 ) {
   const workOrder: WorkOrder = {
     ...report.work_order,
@@ -1458,9 +1664,7 @@ function applyClientPatches(
   };
 
   for (const issue of report.safety_issues) {
-    if (issue.resolved || safetyResolutions[issue.code]) {
-      mergePatch(workOrder, issue.work_order_patch);
-    }
+    applySafetyIssueToWorkOrder(workOrder, issue, safetyResolutions, safetyCustomSubmitted);
   }
 
   for (const item of report.approval_queue) {
@@ -1475,6 +1679,126 @@ function applyClientPatches(
   }
 
   return workOrder;
+}
+
+function resolutionLooksCustom(resolution: string) {
+  return resolution.toLowerCase().includes("custom");
+}
+
+function applySafetyIssueToWorkOrder(
+  workOrder: WorkOrder,
+  issue: SafetyIssue,
+  safetyResolutions: Record<string, string>,
+  safetyCustomSubmitted: Record<string, string>,
+) {
+  if (issue.resolved) {
+    mergePatch(workOrder, issue.work_order_patch);
+
+    return;
+  }
+
+  const resolution = safetyResolutions[issue.code];
+
+  if (!resolution) {
+    return;
+  }
+
+  if (resolutionLooksCustom(resolution)) {
+    const submitted = safetyCustomSubmitted[issue.code]?.trim();
+
+    if (submitted) {
+      workOrder.custom_instructions = appendUnique(workOrder.custom_instructions ?? [], [submitted]);
+      mergePatch(workOrder, issue.work_order_patch);
+    }
+
+    return;
+  }
+
+  mergePatch(workOrder, issue.work_order_patch);
+}
+
+function safetyIssuesBlockHandoff(
+  issues: SafetyIssue[],
+  safetyResolutions: Record<string, string>,
+  safetyCustomSubmitted: Record<string, string>,
+) {
+  const roots = issues.filter((issue) => !issue.parent_code);
+
+  return roots.some(
+    (issue) => !isSafetyIssueSubtreeComplete(issue, issues, safetyResolutions, safetyCustomSubmitted),
+  );
+}
+
+function isSafetyIssueSubtreeComplete(
+  issue: SafetyIssue,
+  allIssues: SafetyIssue[],
+  safetyResolutions: Record<string, string>,
+  safetyCustomSubmitted: Record<string, string>,
+): boolean {
+  const selfComplete = isSafetyIssueSelfComplete(issue, safetyResolutions, safetyCustomSubmitted);
+  const children = allIssues.filter((candidate) => candidate.parent_code === issue.code);
+
+  if (!selfComplete) {
+    return false;
+  }
+
+  return children.every((child) =>
+    isSafetyIssueSubtreeComplete(child, allIssues, safetyResolutions, safetyCustomSubmitted),
+  );
+}
+
+function isSafetyIssueSelfComplete(
+  issue: SafetyIssue,
+  safetyResolutions: Record<string, string>,
+  safetyCustomSubmitted: Record<string, string>,
+) {
+  if (issue.resolved) {
+    return true;
+  }
+
+  const resolution = safetyResolutions[issue.code];
+
+  if (!resolution) {
+    return false;
+  }
+
+  if (resolutionLooksCustom(resolution)) {
+    return Boolean(safetyCustomSubmitted[issue.code]?.trim());
+  }
+
+  return true;
+}
+
+function issueStatusBadge(
+  recheckingCode: string | null,
+  issue: SafetyIssue,
+  allIssues: SafetyIssue[],
+  safetyResolutions: Record<string, string>,
+  safetyCustomSubmitted: Record<string, string>,
+): "open" | "resolved" | "follow-up" | "checking" {
+  if (recheckingCode === issue.code) {
+    return "checking";
+  }
+
+  const children = allIssues.filter((candidate) => candidate.parent_code === issue.code);
+  const nestedIncomplete = children.some(
+    (child) => !isSafetyIssueSubtreeComplete(child, allIssues, safetyResolutions, safetyCustomSubmitted),
+  );
+  const selfComplete = isSafetyIssueSelfComplete(issue, safetyResolutions, safetyCustomSubmitted);
+
+  if (nestedIncomplete && (issue.resolved || selfComplete)) {
+    return "follow-up";
+  }
+
+  if (nestedIncomplete) {
+    return "open";
+  }
+
+  if (issue.resolved || selfComplete) {
+    return "resolved";
+  }
+
+  return "open";
 }
 
 function mergePatch(workOrder: WorkOrder, patch?: WorkOrderPatch) {
