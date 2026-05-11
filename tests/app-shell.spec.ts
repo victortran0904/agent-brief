@@ -112,6 +112,40 @@ test("renders the local Agent Brief app shell", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Copy JSON" })).toBeVisible();
 });
 
+test("merges uploaded workspace files into the indexed file count", async ({ page }) => {
+  await page.route("**/api/workspace-scan", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        rootPath: "/Users/local/private/workspace",
+        maxDepth: 3,
+        files: [
+          {
+            path: "README.md",
+            sourceLabel: "README.md",
+            extension: ".md",
+            sizeBytes: 12,
+            content: "workspace policy\n",
+            truncated: false,
+          },
+        ],
+      }),
+    });
+  });
+
+  await page.goto("/");
+  await expect(page.getByLabel("Workspace scan status")).toContainText("1 files indexed");
+
+  await page.getByLabel("Add workspace files from your computer").setInputFiles({
+    name: "extra-notes.md",
+    mimeType: "text/markdown",
+    buffer: Buffer.from("# Extra context\n"),
+  });
+
+  await expect(page.getByRole("button", { name: "Clear 1 added file" })).toBeVisible();
+  await expect(page.getByLabel("Workspace scan status")).toContainText("2 files indexed");
+});
+
 test("demo presets fill inputs and run through the standard analyze path", async ({ page }) => {
   let analyzeRequest: unknown = null;
 
@@ -281,7 +315,10 @@ test("supports placeholder report interactions", async ({ page }) => {
   await expect(page.locator(".nutrition-detail").getByText(/The task has a clear travel goal/)).toBeVisible();
   await page.getByRole("button", { name: "Research only; do not book" }).click();
   await expect(page.getByText("Resolved", { exact: true })).toBeVisible();
-  await expect(page.getByText("1 open - 1 resolved")).toBeVisible();
+  await expect(page.getByText("1 open · 1 resolved")).toBeVisible();
+
+  await page.getByRole("button", { name: "Require freshness confirmation" }).click();
+  await expect(page.getByText("0 open · 2 resolved")).toBeVisible();
 
   await page.getByRole("button", { name: "Ask before payment" }).click();
   await expect(page.getByRole("button", { name: "Ask before payment" })).toHaveAttribute("aria-pressed", "true");
@@ -381,8 +418,6 @@ test("previews a safe workspace scan and excludes ignored paths", async ({ page 
   expect(largeFile?.content.length).toBe(200_000);
 
   await expect(page.getByLabel("Workspace scan status")).toContainText(`${scan.files.length} files indexed`);
-  await expect(page.getByLabel("Workspace file indicators")).toContainText("00-scan-preview-fixture/README.md");
-  await expect(page.getByLabel("Workspace file indicators")).toContainText("00-scan-preview-fixture/.env.example");
 });
 
 test("disables pre-flight while workspace scan is pending", async ({ page }) => {
@@ -416,11 +451,11 @@ test("disables pre-flight while workspace scan is pending", async ({ page }) => 
 
   const runButton = page.getByRole("button", { name: "Run Pre-flight Check" });
   await expect(runButton).toBeDisabled();
-  await expect(page.getByLabel("Workspace file indicators")).toContainText("Scanning workspace...");
+  await expect(page.getByText("Indexing workspace…")).toBeVisible();
 
   releaseScan();
 
-  await expect(page.getByLabel("Workspace file indicators")).toContainText("README.md");
+  await expect(page.getByLabel("Workspace scan status")).toContainText("1 files indexed");
   await expect(runButton).toBeEnabled();
 });
 
@@ -521,7 +556,7 @@ test("runs analysis with task, extra context, and workspace files, then renders 
   });
 
   await page.goto("/");
-  await expect(page.getByLabel("Workspace file indicators")).toContainText("README.md");
+  await expect(page.getByLabel("Workspace scan status")).toContainText("1 files indexed");
   await page.getByLabel("Additional Context").fill("Extra context: I need refundable fares only.");
   await page.getByRole("button", { name: "Run Pre-flight Check" }).click();
 
@@ -545,7 +580,11 @@ test("runs analysis with task, extra context, and workspace files, then renders 
   await expect(workOrder).not.toContainText("payment");
   await page.getByRole("button", { name: "Research only; do not book" }).click();
   await expect(workOrder).toContainText("payment");
-  await page.getByRole("button", { name: "Custom instruction" }).click();
+  await page
+    .locator(".approval-item")
+    .filter({ hasText: "Can the agent book directly" })
+    .getByRole("button", { name: "Custom instruction" })
+    .click();
   await page.getByLabel("Can the agent book directly? custom instruction").fill("Only hold refundable fares for review.");
   await expect(workOrder).toContainText("Only hold refundable fares for review.");
   await expect(page.getByLabel("Cursor handoff prompt")).toContainText("Do not book or purchase anything without explicit approval.");
@@ -608,7 +647,7 @@ test("ignores an in-flight analysis response after switching demo presets", asyn
   });
 
   await page.goto("/");
-  await expect(page.getByLabel("Workspace file indicators")).toContainText("README.md");
+  await expect(page.getByLabel("Workspace scan status")).toContainText("1 files indexed");
   await page.getByRole("button", { name: "Run Pre-flight Check" }).click();
   await expect(page.getByRole("button", { name: "Analyzing..." })).toBeVisible();
 
@@ -939,7 +978,7 @@ test("streams analysis progress and progressively renders the final report", asy
   });
 
   await page.goto("/");
-  await expect(page.getByLabel("Workspace file indicators")).toContainText("README.md");
+  await expect(page.getByLabel("Workspace scan status")).toContainText("1 files indexed");
   await page.getByRole("button", { name: "Run Pre-flight Check" }).click();
 
   await expect(page.getByText("Streaming NYC analysis")).toBeVisible();
@@ -1213,7 +1252,7 @@ test("packages fetched scan data into the pre-flight handoff", async ({ page }) 
 
   await page.goto("/");
 
-  await expect(page.getByLabel("Workspace file indicators")).toContainText("00-scan-preview-fixture/README.md");
+  await expect(page.getByLabel("Workspace scan status")).toContainText("2 files indexed");
   const analyzePost = page.waitForRequest(
     (request) => request.url().includes("/api/analyze") && request.method() === "POST",
   );
@@ -1240,6 +1279,115 @@ test("packages fetched scan data into the pre-flight handoff", async ({ page }) 
       }),
     ]),
   );
+});
+
+test("custom safety re-check can open nested follow-ups and gate copy until resolved", async ({ page }) => {
+  await page.route("**/api/workspace-scan", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        rootPath: "/x",
+        maxDepth: 3,
+        files: [
+          {
+            path: "README.md",
+            sourceLabel: "README.md",
+            extension: ".md",
+            sizeBytes: 4,
+            content: "workspace policy\n",
+            truncated: false,
+          },
+        ],
+      }),
+    });
+  });
+
+  await page.route("**/api/analyze", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        agent_readiness_score: 40,
+        workspace_safety_score: 40,
+        nutrition_label: {},
+        safety_issues: [
+          {
+            code: "V-099",
+            title: "Test permission scope",
+            risk: "Broad tool access could expose private data.",
+            evidence: "policy mentions Gmail",
+            fix_options: ["Narrow scope", "Custom instruction"],
+            benefit: "Limits accidental exposure.",
+            resolved: false,
+            work_order_patch: {
+              requires_approval: ["email access"],
+            },
+          },
+        ],
+        approval_queue: [],
+        work_order: {
+          goal: "Research options safely.",
+          allowed_actions: ["read"],
+          blocked_actions: [],
+          requires_approval: [],
+          missing_info: [],
+          success_criteria: [],
+          receipt_required: false,
+        },
+        receipt_template: [],
+        cursor_handoff_prompt: "Scoped handoff.",
+      }),
+    });
+  });
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "Run Pre-flight Check" }).click();
+
+  await expect(page.getByRole("heading", { name: /Test permission scope/ })).toBeVisible();
+
+  await page.route("**/api/safety-recheck", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        safety_issues: [
+          {
+            code: "V-099",
+            title: "Test permission scope",
+            risk: "Broad tool access could expose private data.",
+            evidence: "policy mentions Gmail",
+            fix_options: ["Narrow scope", "Custom instruction"],
+            benefit: "Limits accidental exposure.",
+            resolved: true,
+            work_order_patch: {
+              requires_approval: ["email access"],
+            },
+          },
+          {
+            code: "V-099A",
+            parent_code: "V-099",
+            title: "Residual inbox scope ambiguity",
+            risk: "Vendor-only receipts may still require opening full threads.",
+            evidence: "receipts only",
+            fix_options: ["Use vendor receipts only", "Custom instruction"],
+            benefit: "Reduces inbox exposure.",
+            resolved: false,
+            work_order_patch: {},
+          },
+        ],
+        agent_readiness_score: 55,
+        workspace_safety_score: 48,
+      }),
+    });
+  });
+
+  await page.getByRole("button", { name: "Custom instruction" }).first().click();
+  await page.getByLabel(/Test permission scope custom safety instruction/).fill("Receipts only from travel vendors.");
+  await page.getByRole("button", { name: "Submit + re-check" }).click();
+
+  await expect(page.getByRole("heading", { name: /Residual inbox scope ambiguity/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Copy for Cursor" })).toBeDisabled();
+
+  await page.getByRole("button", { name: "Use vendor receipts only" }).click();
+  await expect(page.getByRole("button", { name: "Copy for Cursor" })).toBeEnabled();
 });
 
 test("builds a CLoD-compatible analyze provider request", () => {
