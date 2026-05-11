@@ -518,11 +518,12 @@ export default function Home() {
   }, []);
 
   async function handleWorkspaceFileUpload(event: ChangeEvent<HTMLInputElement>) {
-    const list = event.target.files;
+    const input = event.target;
+    // Snapshot before clearing: `input.files` is a live list; resetting `value` empties it in WebKit/Firefox.
+    const pickedFiles = input.files?.length ? Array.from(input.files) : [];
+    input.value = "";
 
-    event.target.value = "";
-
-    if (!list?.length) {
+    if (!pickedFiles.length) {
       return;
     }
 
@@ -530,7 +531,7 @@ export default function Home() {
     const added: WorkspaceScanFile[] = [];
     const errors: string[] = [];
 
-    for (const file of Array.from(list)) {
+    for (const file of pickedFiles) {
       const converted = await browserFileToWorkspaceFile(file, pathClaims);
 
       if (!converted) {

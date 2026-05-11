@@ -112,6 +112,40 @@ test("renders the local Agent Brief app shell", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Copy JSON" })).toBeVisible();
 });
 
+test("merges uploaded workspace files into the indexed file count", async ({ page }) => {
+  await page.route("**/api/workspace-scan", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        rootPath: "/Users/local/private/workspace",
+        maxDepth: 3,
+        files: [
+          {
+            path: "README.md",
+            sourceLabel: "README.md",
+            extension: ".md",
+            sizeBytes: 12,
+            content: "workspace policy\n",
+            truncated: false,
+          },
+        ],
+      }),
+    });
+  });
+
+  await page.goto("/");
+  await expect(page.getByLabel("Workspace scan status")).toContainText("1 files indexed");
+
+  await page.getByLabel("Add workspace files from your computer").setInputFiles({
+    name: "extra-notes.md",
+    mimeType: "text/markdown",
+    buffer: Buffer.from("# Extra context\n"),
+  });
+
+  await expect(page.getByRole("button", { name: "Clear 1 added file" })).toBeVisible();
+  await expect(page.getByLabel("Workspace scan status")).toContainText("2 files indexed");
+});
+
 test("demo presets fill inputs and run through the standard analyze path", async ({ page }) => {
   let analyzeRequest: unknown = null;
 
