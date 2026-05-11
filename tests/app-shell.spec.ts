@@ -2,6 +2,7 @@ import { expect, test } from "@playwright/test";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { buildClodRequest, extractAnalysisJsonFromMessage, POST } from "../app/api/analyze/route";
+import { defaultPreflightContext, defaultPreflightTask } from "../demo/email-campaign/presets";
 
 const scanFixtureDir = path.join(process.cwd(), "00-scan-preview-fixture");
 
@@ -84,12 +85,9 @@ test("renders the local Agent Brief app shell", async ({ page }) => {
 
   await expect(page).toHaveTitle(/Agent Brief/);
   await expect(page.getByRole("heading", { name: "Pre-flight Check" })).toBeVisible();
-  await expect(page.getByRole("button", { name: /NYC Travel/ })).toBeVisible();
-  await expect(page.getByRole("button", { name: /Code Refactor/ })).toBeVisible();
-  await expect(page.getByRole("button", { name: /Email Campaign/ })).toBeVisible();
   await expect(page.getByLabel("Task")).toBeVisible();
   await expect(page.getByLabel("Additional Context")).toBeVisible();
-  await expect(page.getByText("Workspace Files")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Add files…" })).toBeVisible();
   await expect(page.getByRole("button", { name: /Run Pre-flight Check/ })).toBeVisible();
 
   const leftPanel = page.getByTestId("input-panel");
@@ -143,10 +141,74 @@ test("merges uploaded workspace files into the indexed file count", async ({ pag
   });
 
   await expect(page.getByRole("button", { name: "Clear 1 added file" })).toBeVisible();
+  await expect(page.getByRole("list")).toContainText("extra-notes.md");
   await expect(page.getByLabel("Workspace scan status")).toContainText("2 files indexed");
 });
 
-test("demo presets fill inputs and run through the standard analyze path", async ({ page }) => {
+test("folder upload preserves nested paths for workspace context", async ({ page }) => {
+  let analyzeWorkspacePaths: string[] = [];
+
+  await page.route("**/api/workspace-scan", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        rootPath: "/Users/local/private/workspace",
+        maxDepth: 3,
+        files: [
+          {
+            path: "README.md",
+            sourceLabel: "README.md",
+            extension: ".md",
+            sizeBytes: 12,
+            content: "workspace policy\n",
+            truncated: false,
+          },
+        ],
+      }),
+    });
+  });
+
+  await page.route("**/api/analyze", async (route) => {
+    const body = route.request().postDataJSON() as { workspaceFiles: { path: string }[] };
+    analyzeWorkspacePaths = body.workspaceFiles.map((file) => file.path);
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        agent_readiness_score: 50,
+        workspace_safety_score: 50,
+        nutrition_label: {},
+        safety_issues: [],
+        approval_queue: [],
+        work_order: {
+          goal: "Folder upload merge check.",
+          allowed_actions: ["read"],
+          blocked_actions: ["send"],
+          requires_approval: [],
+          missing_info: [],
+          success_criteria: ["ok"],
+          receipt_required: false,
+        },
+        receipt_template: [],
+        cursor_handoff_prompt: "ok",
+      }),
+    });
+  });
+
+  await page.goto("/");
+  const handoffDir = path.join(process.cwd(), "tests", "fixtures", "demo-handoff-folder");
+  await page.getByLabel("Add workspace folder from your computer").setInputFiles(handoffDir);
+
+  await expect(page.getByLabel("Workspace scan status")).toContainText("2 files indexed");
+
+  await page.getByRole("button", { name: "Run Pre-flight Check" }).click();
+
+  await expect.poll(() => analyzeWorkspacePaths.length).toBeGreaterThan(0);
+  const joined = analyzeWorkspacePaths.join("\n");
+  expect(joined).toContain("demo-handoff-folder");
+  expect(joined).toContain("nested/note.md");
+});
+
+test("default task and context run through the standard analyze path", async ({ page }) => {
   let analyzeRequest: unknown = null;
 
   await page.route("**/api/workspace-scan", async (route) => {
@@ -195,16 +257,15 @@ test("demo presets fill inputs and run through the standard analyze path", async
   });
 
   await page.goto("/");
-  await page.getByRole("button", { name: /Code Refactor/ }).click();
 
-  await expect(page.getByLabel("Task")).toHaveValue(/Refactor the authentication module/);
-  await expect(page.getByLabel("Additional Context")).toHaveValue(/source of truth is unclear/);
+  await expect(page.getByLabel("Task")).toHaveValue(defaultPreflightTask);
+  await expect(page.getByLabel("Additional Context")).toHaveValue(defaultPreflightContext);
 
   await page.getByRole("button", { name: "Run Pre-flight Check" }).click();
 
   expect(analyzeRequest).toMatchObject({
-    task: expect.stringContaining("Refactor the authentication module"),
-    context: expect.stringContaining("source of truth is unclear"),
+    task: defaultPreflightTask,
+    context: defaultPreflightContext,
     workspaceFiles: [
       expect.objectContaining({
         path: "README.md",
@@ -213,6 +274,9 @@ test("demo presets fill inputs and run through the standard analyze path", async
   });
   await expect(page.locator(".work-order-goal")).toContainText("Refactor the auth module safely.");
 });
+
+const refactorDemoTask =
+  "Refactor the authentication module so it is easier for Cursor agents to maintain, but avoid changing user-visible login behavior.";
 
 test("supports placeholder report interactions", async ({ page }) => {
   await page.route("**/api/workspace-scan", async (route) => {
@@ -557,6 +621,7 @@ test("runs analysis with task, extra context, and workspace files, then renders 
 
   await page.goto("/");
   await expect(page.getByLabel("Workspace scan status")).toContainText("1 files indexed");
+  await page.getByLabel("Task").fill("Plan my NYC trip next weekend and book whatever is cheapest.");
   await page.getByLabel("Additional Context").fill("Extra context: I need refundable fares only.");
   await page.getByRole("button", { name: "Run Pre-flight Check" }).click();
 
@@ -589,13 +654,14 @@ test("runs analysis with task, extra context, and workspace files, then renders 
   await expect(workOrder).toContainText("Only hold refundable fares for review.");
   await expect(page.getByLabel("Cursor handoff prompt")).toContainText("Do not book or purchase anything without explicit approval.");
 
-  await page.getByRole("button", { name: /Code Refactor/ }).click();
-  await expect(page.getByLabel("Task")).toHaveValue(/Refactor the authentication module/);
+  await page.goto("/");
+  await expect(page.getByLabel("Task")).toHaveValue(defaultPreflightTask);
+  await expect(page.getByLabel("Additional Context")).toHaveValue(defaultPreflightContext);
   await expect(page.locator('[data-testid="output-panel"]')).toHaveCount(0);
   await expect(page.getByText("Only hold refundable fares for review.")).toHaveCount(0);
 });
 
-test("ignores an in-flight analysis response after switching demo presets", async ({ page }) => {
+test("ignores an in-flight analysis response after editing task mid-flight", async ({ page }) => {
   let releaseAnalysis: (value: void) => void = () => {};
   const analysisPending = new Promise<void>((resolve) => {
     releaseAnalysis = resolve;
@@ -651,7 +717,7 @@ test("ignores an in-flight analysis response after switching demo presets", asyn
   await page.getByRole("button", { name: "Run Pre-flight Check" }).click();
   await expect(page.getByRole("button", { name: "Analyzing..." })).toBeVisible();
 
-  await page.getByRole("button", { name: /Code Refactor/ }).click();
+  await page.getByLabel("Task").fill(refactorDemoTask);
   await expect(page.getByLabel("Task")).toHaveValue(/Refactor the authentication module/);
   await expect(page.locator('[data-testid="output-panel"]')).toHaveCount(0);
 
@@ -1263,8 +1329,8 @@ test("packages fetched scan data into the pre-flight handoff", async ({ page }) 
     workspaceFiles: Array<{ sourceLabel: string; content: string; size: number }>;
   };
 
-  expect(payload.task).toBe("Plan my NYC trip next weekend and book whatever is cheapest.");
-  expect(payload.context).toContain("old travel preferences");
+  expect(payload.task).toBe(defaultPreflightTask);
+  expect(payload.context).toBe(defaultPreflightContext);
   expect(JSON.stringify(payload)).not.toContain("/Users/");
   expect(payload.workspaceFiles).toEqual(
     expect.arrayContaining([
