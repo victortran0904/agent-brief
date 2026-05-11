@@ -508,6 +508,32 @@ textarea.textarea-auto-grow {
   margin-left: auto;
 }
 
+/* Nutrition card: stronger hierarchy between section title and expandable rows */
+.card--nutrition .card-header {
+  margin-bottom: 0;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.card--nutrition .card-header h2 {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.card--nutrition .nutrition-list {
+  border-top: 0;
+  margin-top: 0;
+}
+
+.card--nutrition .nutrition-trigger-label {
+  font-weight: 400;
+}
+
+.card--nutrition .nutrition-row.open .nutrition-trigger-label {
+  font-weight: 500;
+}
+
 .nutrition-list {
   border-top: 1px solid var(--color-border);
   display: flex;

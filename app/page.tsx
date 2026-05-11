@@ -734,7 +734,17 @@ export default function Home() {
     }
   }
 
-  function renderSafetyIssueCluster(issue: SafetyIssue): ReactNode {
+  function renderSafetyIssueCluster(issue: SafetyIssue, ancestorVisited: Set<string>): ReactNode {
+    if (ancestorVisited.has(issue.code)) {
+      return (
+        <p className="safety-recheck-error" role="alert">
+          Circular safety issue parent chain detected at {issue.code}. The analysis response cannot be rendered safely.
+        </p>
+      );
+    }
+
+    const nextVisited = new Set(ancestorVisited);
+    nextVisited.add(issue.code);
     const badge = issueStatusBadge(
       safetyRecheckingCode,
       issue,
@@ -743,7 +753,7 @@ export default function Home() {
       safetyCustomSubmitted,
     );
     const selectedResolution = safetyResolutions[issue.code];
-    const isCustom = Boolean(selectedResolution?.toLowerCase().includes("custom"));
+    const isCustom = resolutionLooksCustom(selectedResolution ?? "");
     const draftValue = safetyCustomDraft[issue.code] ?? "";
     const children = report.safety_issues.filter((row) => row.parent_code === issue.code);
     const rowTone = badge === "resolved" || badge === "follow-up" ? "resolved" : "issue-open";
@@ -855,7 +865,7 @@ export default function Home() {
         </div>
         {children.map((child) => (
           <div className="issue-nested" key={child.code}>
-            {renderSafetyIssueCluster(child)}
+            {renderSafetyIssueCluster(child, nextVisited)}
           </div>
         ))}
       </>
@@ -1043,7 +1053,7 @@ export default function Home() {
             <ScoreCard label="Workspace Safety" value={report.workspace_safety_score} />
           </div>
 
-          <section className="card">
+          <section className="card card--nutrition">
             <CardHeader title="Context Nutrition Label" meta="click rows" />
             <div className="nutrition-list">
               {nutritionRows.map((row) => {
@@ -1090,7 +1100,7 @@ export default function Home() {
 
                 return (
                   <div className={`issue-cluster${nestedCount ? " issue-cluster--follow-up" : ""}`} key={issue.code}>
-                    {renderSafetyIssueCluster(issue)}
+                    {renderSafetyIssueCluster(issue, new Set())}
                   </div>
                 );
               })}
@@ -1683,7 +1693,7 @@ function applyClientPatches(
 }
 
 function resolutionLooksCustom(resolution: string) {
-  return resolution.toLowerCase().includes("custom");
+  return resolution.trim().toLowerCase() === "custom instruction";
 }
 
 function applySafetyIssueToWorkOrder(
@@ -1735,7 +1745,14 @@ function isSafetyIssueSubtreeComplete(
   allIssues: SafetyIssue[],
   safetyResolutions: Record<string, string>,
   safetyCustomSubmitted: Record<string, string>,
+  visited: Set<string> = new Set(),
 ): boolean {
+  if (visited.has(issue.code)) {
+    return false;
+  }
+
+  visited.add(issue.code);
+
   const selfComplete = isSafetyIssueSelfComplete(issue, safetyResolutions, safetyCustomSubmitted);
   const children = allIssues.filter((candidate) => candidate.parent_code === issue.code);
 
@@ -1744,7 +1761,7 @@ function isSafetyIssueSubtreeComplete(
   }
 
   return children.every((child) =>
-    isSafetyIssueSubtreeComplete(child, allIssues, safetyResolutions, safetyCustomSubmitted),
+    isSafetyIssueSubtreeComplete(child, allIssues, safetyResolutions, safetyCustomSubmitted, visited),
   );
 }
 

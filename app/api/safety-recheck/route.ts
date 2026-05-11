@@ -185,6 +185,14 @@ export async function POST(request: Request) {
         typeof workspace_safety_score === "number" && Number.isFinite(workspace_safety_score) ? workspace_safety_score : undefined,
     });
   } catch {
-    return NextResponse.json({ error: "CLoD safety re-check returned invalid JSON content", raw: content }, { status: 502 });
+    const payload: { error: string; raw?: string } = {
+      error: "CLoD safety re-check returned invalid JSON content",
+    };
+
+    if (process.env.NODE_ENV === "development") {
+      payload.raw = content.slice(0, 1200);
+    }
+
+    return NextResponse.json(payload, { status: 502 });
   }
 }
