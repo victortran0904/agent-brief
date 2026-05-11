@@ -277,6 +277,12 @@ textarea.textarea-auto-grow {
   gap: 8px;
 }
 
+.file-chips {
+  align-content: flex-start;
+  max-height: min(40vh, 280px);
+  overflow-y: auto;
+}
+
 .file-chip,
 .work-order-chip {
   align-items: center;

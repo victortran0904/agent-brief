@@ -346,21 +346,21 @@ function isBinarySampleUint8(sample: Uint8Array): boolean {
 }
 
 async function browserFileToWorkspaceFile(file: File, claimedPaths: Set<string>): Promise<WorkspaceScanFile | null> {
-  const buffer = new Uint8Array(await file.arrayBuffer());
-
-  if (!buffer.length) {
+  if (file.size === 0) {
     return null;
   }
 
-  const head = buffer.subarray(0, Math.min(buffer.length, BINARY_SAMPLE_BYTES));
+  const headByteLength = Math.min(file.size, BINARY_SAMPLE_BYTES);
+  const head = new Uint8Array(await file.slice(0, headByteLength).arrayBuffer());
 
   if (isBinarySampleUint8(head)) {
     return null;
   }
 
-  const truncated = buffer.byteLength > WORKSPACE_FILE_MAX_BYTES;
-  const slice = buffer.subarray(0, WORKSPACE_FILE_MAX_BYTES);
-  const text = new TextDecoder("utf-8", { fatal: false }).decode(slice);
+  const truncated = file.size > WORKSPACE_FILE_MAX_BYTES;
+  const contentByteLength = Math.min(file.size, WORKSPACE_FILE_MAX_BYTES);
+  const contentBytes = new Uint8Array(await file.slice(0, contentByteLength).arrayBuffer());
+  const text = new TextDecoder("utf-8", { fatal: false }).decode(contentBytes);
   const path = claimUniqueUploadPath(file.name, claimedPaths);
   const extension = file.name.includes(".") ? file.name.slice(file.name.lastIndexOf(".")) : file.name;
 
@@ -368,7 +368,7 @@ async function browserFileToWorkspaceFile(file: File, claimedPaths: Set<string>)
     path,
     sourceLabel: path,
     extension,
-    sizeBytes: buffer.byteLength,
+    sizeBytes: file.size,
     content: text,
     truncated,
   };
@@ -406,7 +406,6 @@ export default function Home() {
     [uploadedWorkspaceFiles, workspaceScan],
   );
   const indexedFiles = mergedWorkspaceScan?.files ?? [];
-  const representativeFiles = indexedFiles.slice(0, 8);
   const canRunPreflight = Boolean(mergedWorkspaceScan) && !isAnalyzing;
   const nutritionRows = useMemo(() => toNutritionRows(report.nutrition_label), [report.nutrition_label]);
   const workOrderState = useMemo(
@@ -740,7 +739,7 @@ export default function Home() {
             </p>
             <div className="workspace-files-actions">
               <input
-                accept=".md,.txt,.json,.yaml,.yml,.toml,.csv,.doc,.env,.example"
+                accept=".md,.txt,.json,.yaml,.yml,.toml,.csv,.doc,.example"
                 aria-label="Add workspace files from your computer"
                 className="workspace-files-input"
                 multiple
@@ -762,8 +761,8 @@ export default function Home() {
               </p>
             ) : null}
             <div className="file-chips" aria-label="Workspace file indicators">
-              {representativeFiles.length > 0 ? (
-                representativeFiles.map((file) => {
+              {indexedFiles.length > 0 ? (
+                indexedFiles.map((file) => {
                   const isUpload = file.path.startsWith("demo-upload/");
                   return (
                     <span className={`file-chip${isUpload ? " file-chip--upload" : ""}`} key={file.path} title={`${file.sizeBytes} bytes`}>
