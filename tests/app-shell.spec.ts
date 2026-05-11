@@ -86,7 +86,8 @@ test("renders the local Agent Brief app shell", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Pre-flight Check" })).toBeVisible();
   await expect(page.getByRole("button", { name: /NYC Travel/ })).toBeVisible();
   await expect(page.getByRole("button", { name: /Code Refactor/ })).toBeVisible();
-  await expect(page.getByRole("button", { name: /Email Campaign/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Email · thin handoff/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Email · strong handoff/ })).toBeVisible();
   await expect(page.getByLabel("Task")).toBeVisible();
   await expect(page.getByLabel("Additional Context")).toBeVisible();
   await expect(page.getByText("Workspace Files")).toBeVisible();
@@ -143,7 +144,71 @@ test("merges uploaded workspace files into the indexed file count", async ({ pag
   });
 
   await expect(page.getByRole("button", { name: "Clear 1 added file" })).toBeVisible();
+  await expect(page.getByRole("list")).toContainText("extra-notes.md");
   await expect(page.getByLabel("Workspace scan status")).toContainText("2 files indexed");
+});
+
+test("folder upload preserves nested paths for workspace context", async ({ page }) => {
+  let analyzeWorkspacePaths: string[] = [];
+
+  await page.route("**/api/workspace-scan", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        rootPath: "/Users/local/private/workspace",
+        maxDepth: 3,
+        files: [
+          {
+            path: "README.md",
+            sourceLabel: "README.md",
+            extension: ".md",
+            sizeBytes: 12,
+            content: "workspace policy\n",
+            truncated: false,
+          },
+        ],
+      }),
+    });
+  });
+
+  await page.route("**/api/analyze", async (route) => {
+    const body = route.request().postDataJSON() as { workspaceFiles: { path: string }[] };
+    analyzeWorkspacePaths = body.workspaceFiles.map((file) => file.path);
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        agent_readiness_score: 50,
+        workspace_safety_score: 50,
+        nutrition_label: {},
+        safety_issues: [],
+        approval_queue: [],
+        work_order: {
+          goal: "Folder upload merge check.",
+          allowed_actions: ["read"],
+          blocked_actions: ["send"],
+          requires_approval: [],
+          missing_info: [],
+          success_criteria: ["ok"],
+          receipt_required: false,
+        },
+        receipt_template: [],
+        cursor_handoff_prompt: "ok",
+      }),
+    });
+  });
+
+  await page.goto("/");
+  const handoffDir = path.join(process.cwd(), "tests", "fixtures", "demo-handoff-folder");
+  await page.getByLabel("Add workspace folder from your computer").setInputFiles(handoffDir);
+
+  await expect(page.getByLabel("Workspace scan status")).toContainText("2 files indexed");
+
+  await page.getByRole("button", { name: "Run Pre-flight Check" }).click();
+
+  await expect.poll(() => analyzeWorkspacePaths.length).toBeGreaterThan(0);
+  const joined = analyzeWorkspacePaths.join("\n");
+  expect(joined).toContain("demo-handoff-folder");
+  expect(joined).toContain("nested/note.md");
 });
 
 test("demo presets fill inputs and run through the standard analyze path", async ({ page }) => {

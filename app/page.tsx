@@ -1,11 +1,147 @@
 "use client";
 
+import { emailCampaignDemoPresets, isEmailHandoffDemoPreset } from "../demo/email-campaign/presets";
+import type { DemoPreset } from "../lib/demo-preset";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { ChangeEvent, KeyboardEvent, MouseEvent, ReactNode } from "react";
+import type { ChangeEvent, DragEvent, KeyboardEvent, MouseEvent, ReactNode } from "react";
 
 /** Matches server-side workspace preview limit (`lib/workspace-scanner.ts`). */
 const WORKSPACE_FILE_MAX_BYTES = 200_000;
 const BINARY_SAMPLE_BYTES = 512;
+/** Matches `MAX_DEPTH` in `lib/workspace-scanner.ts` for nested upload paths. */
+const WORKSPACE_UPLOAD_MAX_DEPTH = 3;
+const SKIPPED_UPLOAD_DIR_NAMES = new Set(["node_modules", ".git", "dist", "build", ".next"]);
+
+const DEMO_UPLOAD_PREFIX = "demo-upload/";
+
+function stripDemoUploadPrefix(storedPath: string): string {
+  return storedPath.startsWith(DEMO_UPLOAD_PREFIX) ? storedPath.slice(DEMO_UPLOAD_PREFIX.length) : storedPath;
+}
+
+const WORKSPACE_UPLOAD_EXTENSIONS = new Set([
+  ".md",
+  ".txt",
+  ".doc",
+  ".json",
+  ".yaml",
+  ".yml",
+  ".toml",
+  ".csv",
+  ".example",
+]);
+
+function isAllowedWorkspaceUploadName(fileName: string): boolean {
+  if (fileName === ".env.example") {
+    return true;
+  }
+
+  if (fileName === ".env" || fileName.startsWith(".env.")) {
+    return false;
+  }
+
+  const lower = fileName.toLowerCase();
+  const dot = lower.lastIndexOf(".");
+
+  if (dot < 0) {
+    return false;
+  }
+
+  return WORKSPACE_UPLOAD_EXTENSIONS.has(lower.slice(dot));
+}
+
+function sanitizeUploadRelativePath(relativePath: string): string | null {
+  const normalized = relativePath.replace(/\\/g, "/").replace(/^\.\/+/, "").replace(/^\/+/, "");
+  const segments = normalized.split("/").filter((segment) => segment.length > 0);
+
+  for (const segment of segments) {
+    if (segment === ".." || segment === ".") {
+      return null;
+    }
+  }
+
+  return segments.join("/");
+}
+
+function uploadPathPassesDepthAndSkips(sanitizedRelativePath: string): { ok: true } | { ok: false; reason: string } {
+  const parts = sanitizedRelativePath.split("/").filter((segment) => segment.length > 0);
+  const directorySegments = parts.slice(0, -1);
+
+  if (directorySegments.some((segment) => SKIPPED_UPLOAD_DIR_NAMES.has(segment))) {
+    return { ok: false, reason: "ignored" };
+  }
+
+  const dirCount = parts.length - 1;
+
+  if (dirCount > WORKSPACE_UPLOAD_MAX_DEPTH - 1) {
+    return { ok: false, reason: "depth" };
+  }
+
+  return { ok: true };
+}
+
+function readDirectoryEntries(reader: FileSystemDirectoryReader): Promise<FileSystemEntry[]> {
+  return new Promise((resolve, reject) => {
+    const entries: FileSystemEntry[] = [];
+
+    const readBatch = () => {
+      reader.readEntries((batch) => {
+        if (batch.length > 0) {
+          entries.push(...batch);
+          readBatch();
+        } else {
+          resolve(entries);
+        }
+      }, reject);
+    };
+
+    readBatch();
+  });
+}
+
+async function collectFilesFromFileSystemEntry(
+  entry: FileSystemEntry,
+  pathPrefix: string,
+): Promise<{ file: File; relativePath: string }[]> {
+  if (entry.isFile) {
+    return new Promise((resolve, reject) => {
+      (entry as FileSystemFileEntry).file(
+        (file) => {
+          resolve([{ file, relativePath: `${pathPrefix}${file.name}` }]);
+        },
+        reject,
+      );
+    });
+  }
+
+  const directory = entry as FileSystemDirectoryEntry;
+
+  if (SKIPPED_UPLOAD_DIR_NAMES.has(directory.name)) {
+    return [];
+  }
+
+  const reader = directory.createReader();
+  const children = await readDirectoryEntries(reader);
+  const nextPrefix = `${pathPrefix}${directory.name}/`;
+  const nested = await Promise.all(children.map((child) => collectFilesFromFileSystemEntry(child, nextPrefix)));
+
+  return nested.flat();
+}
+
+async function collectFromDataTransferItem(item: DataTransferItem): Promise<{ file: File; relativePath: string }[]> {
+  const entry = item.webkitGetAsEntry?.() ?? null;
+
+  if (entry) {
+    if (entry.isFile) {
+      return collectFilesFromFileSystemEntry(entry, "");
+    }
+
+    return collectFilesFromFileSystemEntry(entry, `${(entry as FileSystemDirectoryEntry).name}/`);
+  }
+
+  const fallback = item.getAsFile();
+
+  return fallback ? [{ file: fallback, relativePath: fallback.name }] : [];
+}
 
 const SAFETY_CUSTOM_STARTERS = ["Do not...", "Ask before...", "Only use...", "Limit to..."];
 
@@ -94,14 +230,6 @@ type ReceiptState = {
   usedFallback: boolean;
 };
 
-type DemoPreset = {
-  id: string;
-  title: string;
-  summary: string;
-  task: string;
-  context: string;
-};
-
 const demoPresets: DemoPreset[] = [
   {
     id: "nyc-travel",
@@ -120,15 +248,7 @@ const demoPresets: DemoPreset[] = [
     context:
       "The source of truth is unclear between README guidance, inline comments, and an older architecture note. The workspace may have uncommitted edits. Success criteria are ambiguous: I want better structure, focused tests, and a Work Order update before implementation if the agent finds conflicting ownership or hidden dependencies.",
   },
-  {
-    id: "email-campaign",
-    title: "Email Campaign",
-    summary: "Sending, privacy, approval decisions, reject choices, and custom instructions.",
-    task:
-      "Draft and send a launch email campaign to beta customers announcing the new Agent Brief workflow improvements.",
-    context:
-      "Use the customer CSV and prior campaign copy as context, but do not expose private customer data. The agent may draft subject lines and segmentation notes, but sending email, importing contacts, using customer names, or changing unsubscribe settings requires explicit approval. Include approve, reject, and custom-instruction decisions before any outbound action.",
-  },
+  ...emailCampaignDemoPresets,
 ];
 
 const fallbackReceiptItems = [
@@ -321,22 +441,6 @@ function mergeWorkspaceScanWithUploads(
   };
 }
 
-function claimUniqueUploadPath(fileName: string, claimedPaths: Set<string>): string {
-  let candidate = `demo-upload/${fileName}`;
-  let suffix = 2;
-  const dot = fileName.lastIndexOf(".");
-  const stem = dot > 0 ? fileName.slice(0, dot) : fileName;
-  const ext = dot > 0 ? fileName.slice(dot) : "";
-
-  while (claimedPaths.has(candidate)) {
-    candidate = `demo-upload/${stem} (${suffix})${ext}`;
-    suffix += 1;
-  }
-
-  claimedPaths.add(candidate);
-  return candidate;
-}
-
 function isBinarySampleUint8(sample: Uint8Array): boolean {
   const limit = Math.min(sample.length, BINARY_SAMPLE_BYTES);
 
@@ -349,7 +453,24 @@ function isBinarySampleUint8(sample: Uint8Array): boolean {
   return false;
 }
 
-async function browserFileToWorkspaceFile(file: File, claimedPaths: Set<string>): Promise<WorkspaceScanFile | null> {
+function claimUniqueUploadPathPrefixed(prefix: string, claimedPaths: Set<string>): string {
+  let candidate = prefix;
+  let suffix = 2;
+
+  while (claimedPaths.has(candidate)) {
+    candidate = `${prefix} (${suffix})`;
+    suffix += 1;
+  }
+
+  claimedPaths.add(candidate);
+  return candidate;
+}
+
+async function browserFileToWorkspaceFile(
+  file: File,
+  logicalPath: string,
+  claimedPaths: Set<string>,
+): Promise<WorkspaceScanFile | null> {
   if (file.size === 0) {
     return null;
   }
@@ -361,12 +482,19 @@ async function browserFileToWorkspaceFile(file: File, claimedPaths: Set<string>)
     return null;
   }
 
+  const sanitized = sanitizeUploadRelativePath(logicalPath.replace(/\\/g, "/"));
+
+  if (!sanitized) {
+    return null;
+  }
+
   const truncated = file.size > WORKSPACE_FILE_MAX_BYTES;
   const contentByteLength = Math.min(file.size, WORKSPACE_FILE_MAX_BYTES);
   const contentBytes = new Uint8Array(await file.slice(0, contentByteLength).arrayBuffer());
   const text = new TextDecoder("utf-8", { fatal: false }).decode(contentBytes);
-  const path = claimUniqueUploadPath(file.name, claimedPaths);
-  const extension = file.name.includes(".") ? file.name.slice(file.name.lastIndexOf(".")) : file.name;
+  const path = claimUniqueUploadPathPrefixed(`demo-upload/${sanitized}`, claimedPaths);
+  const baseName = sanitized.includes("/") ? sanitized.slice(sanitized.lastIndexOf("/") + 1) : sanitized;
+  const extension = baseName.includes(".") ? baseName.slice(baseName.lastIndexOf(".")) : baseName;
 
   return {
     path,
@@ -376,6 +504,76 @@ async function browserFileToWorkspaceFile(file: File, claimedPaths: Set<string>)
     content: text,
     truncated,
   };
+}
+
+type BrowserWorkspacePick = {
+  file: File;
+  relativePath: string;
+};
+
+async function ingestWorkspaceBrowserFiles(
+  picks: BrowserWorkspacePick[],
+  existingUploads: WorkspaceScanFile[],
+): Promise<{ added: WorkspaceScanFile[]; errors: string[] }> {
+  const pathClaims = new Set(existingUploads.map((file) => file.path));
+  const added: WorkspaceScanFile[] = [];
+  const errors: string[] = [];
+  let ignoredUnderSkippedDir = 0;
+  let ignoredTooDeep = 0;
+
+  for (const { file, relativePath } of picks) {
+    const normalized = relativePath.replace(/\\/g, "/");
+    const baseName = normalized.includes("/") ? normalized.slice(normalized.lastIndexOf("/") + 1) : normalized;
+
+    if (!isAllowedWorkspaceUploadName(baseName)) {
+      errors.push(`${relativePath} skipped (unsupported type)`);
+      continue;
+    }
+
+    const sanitized = sanitizeUploadRelativePath(normalized);
+
+    if (!sanitized) {
+      errors.push(`${relativePath} skipped (unsafe path)`);
+      continue;
+    }
+
+    const gate = uploadPathPassesDepthAndSkips(sanitized);
+
+    if (!gate.ok) {
+      if (gate.reason === "ignored") {
+        ignoredUnderSkippedDir += 1;
+      } else {
+        ignoredTooDeep += 1;
+      }
+
+      continue;
+    }
+
+    const converted = await browserFileToWorkspaceFile(file, normalized, pathClaims);
+
+    if (!converted) {
+      errors.push(`${relativePath} skipped (binary, empty, or unsafe path)`);
+      continue;
+    }
+
+    added.push(converted);
+  }
+
+  const summaries: string[] = [];
+
+  if (ignoredUnderSkippedDir > 0) {
+    summaries.push(
+      `${ignoredUnderSkippedDir} path${ignoredUnderSkippedDir === 1 ? "" : "s"} under ignored folders (${[...SKIPPED_UPLOAD_DIR_NAMES].join(", ")}) were not attached.`,
+    );
+  }
+
+  if (ignoredTooDeep > 0) {
+    summaries.push(
+      `${ignoredTooDeep} file${ignoredTooDeep === 1 ? "" : "s"} skipped (nested deeper than the ${WORKSPACE_UPLOAD_MAX_DEPTH}-level scan preview).`,
+    );
+  }
+
+  return { added, errors: [...errors, ...summaries] };
 }
 
 export default function Home() {
@@ -392,6 +590,8 @@ export default function Home() {
   const [uploadError, setUploadError] = useState("");
   const [scanError, setScanError] = useState("");
   const workspaceFileInputRef = useRef<HTMLInputElement>(null);
+  const workspaceFolderInputRef = useRef<HTMLInputElement>(null);
+  const [workspaceDropDepth, setWorkspaceDropDepth] = useState(0);
   const [report, setReport] = useState<AnalysisReport>(defaultReport);
   const [analysisError, setAnalysisError] = useState("");
   const [analysisStatus, setAnalysisStatus] = useState("");
@@ -414,6 +614,20 @@ export default function Home() {
     [uploadedWorkspaceFiles, workspaceScan],
   );
   const indexedFiles = mergedWorkspaceScan?.files ?? [];
+  const sortedUploadedWorkspaceFiles = useMemo(
+    () => [...uploadedWorkspaceFiles].sort((left, right) => left.path.localeCompare(right.path)),
+    [uploadedWorkspaceFiles],
+  );
+  const uploadedWorkspaceTopRoots = useMemo(() => {
+    const roots = new Set<string>();
+
+    for (const file of uploadedWorkspaceFiles) {
+      const relative = stripDemoUploadPrefix(file.path);
+      roots.add(relative.includes("/") ? relative.slice(0, relative.indexOf("/")) : relative);
+    }
+
+    return [...roots].sort((left, right) => left.localeCompare(right));
+  }, [uploadedWorkspaceFiles]);
   const canRunPreflight = Boolean(mergedWorkspaceScan) && !isAnalyzing;
   const nutritionRows = useMemo(() => toNutritionRows(report.nutrition_label), [report.nutrition_label]);
   const workOrderState = useMemo(
@@ -527,26 +741,72 @@ export default function Home() {
       return;
     }
 
-    const pathClaims = new Set(uploadedWorkspaceFiles.map((file) => file.path));
-    const added: WorkspaceScanFile[] = [];
-    const errors: string[] = [];
+    const picks: BrowserWorkspacePick[] = pickedFiles.map((file) => {
+      const rawRel = (file as File & { webkitRelativePath?: string }).webkitRelativePath?.trim();
+      const relativePath = rawRel && rawRel.length > 0 ? rawRel.replace(/\\/g, "/") : file.name;
 
-    for (const file of pickedFiles) {
-      const converted = await browserFileToWorkspaceFile(file, pathClaims);
+      return { file, relativePath };
+    });
 
-      if (!converted) {
-        errors.push(`${file.name} skipped (binary or empty)`);
-        continue;
-      }
-
-      added.push(converted);
-    }
+    const { added, errors } = await ingestWorkspaceBrowserFiles(picks, uploadedWorkspaceFiles);
 
     if (added.length) {
       setUploadedWorkspaceFiles((current) => [...current, ...added]);
     }
 
     setUploadError(errors.length ? errors.join(" ") : "");
+  }
+
+  function handleWorkspaceDragEnter(event: DragEvent<HTMLDivElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    setWorkspaceDropDepth((depth) => depth + 1);
+  }
+
+  function handleWorkspaceDragLeave(event: DragEvent<HTMLDivElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    setWorkspaceDropDepth((depth) => Math.max(0, depth - 1));
+  }
+
+  function handleWorkspaceDragOver(event: DragEvent<HTMLDivElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = "copy";
+    }
+  }
+
+  async function handleWorkspaceDrop(event: DragEvent<HTMLDivElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    setWorkspaceDropDepth(0);
+
+    const items = event.dataTransfer?.items;
+
+    if (!items?.length) {
+      return;
+    }
+
+    const picksNested = await Promise.all(Array.from(items).map((item) => collectFromDataTransferItem(item)));
+    const picks = picksNested.flat();
+
+    if (!picks.length) {
+      return;
+    }
+
+    const { added, errors } = await ingestWorkspaceBrowserFiles(picks, uploadedWorkspaceFiles);
+
+    if (added.length) {
+      setUploadedWorkspaceFiles((current) => [...current, ...added]);
+    }
+
+    setUploadError(errors.length ? errors.join(" ") : "");
+  }
+
+  function removeUploadedWorkspaceFile(storedPath: string) {
+    setUploadedWorkspaceFiles((current) => current.filter((file) => file.path !== storedPath));
   }
 
   function flashCopy(kind: "cursor" | "json") {
@@ -956,25 +1216,60 @@ export default function Home() {
             <p>
               {scanError
                 ? `${scanError}. Add files below to supply demo context, or fix the project scan.`
-                : "Local scan preview from safe text, config, and documentation sources. Add your own files for demo-specific context."}
+                : "Local scan preview from safe text, config, and documentation sources. Drag a folder or add files for extra demo context."}
             </p>
-            <div className="workspace-files-actions">
-              <input
-                accept=".md,.txt,.json,.yaml,.yml,.toml,.csv,.example"
-                aria-label="Add workspace files from your computer"
-                className="workspace-files-input"
-                multiple
-                onChange={handleWorkspaceFileUpload}
-                ref={workspaceFileInputRef}
-                type="file"
-              />
-              <button
-                className="workspace-files-add"
-                onClick={() => workspaceFileInputRef.current?.click()}
-                type="button"
-              >
-                Add files…
-              </button>
+            {isEmailHandoffDemoPreset(selectedPresetId) ? (
+              <div className="workspace-demo-callout" role="note">
+                <p>
+                  Email demo: drag <span className="workspace-path-hint">demo/email-campaign/handoff-sparse</span> or{" "}
+                  <span className="workspace-path-hint">demo/email-campaign/handoff-rich</span> onto the drop zone (folder
+                  uploads keep nested paths). Clear uploads before switching between the two email presets.
+                </p>
+              </div>
+            ) : null}
+            <div
+              className={`workspace-drop-zone${workspaceDropDepth > 0 ? " workspace-drop-zone--active" : ""}`}
+              onDragEnter={handleWorkspaceDragEnter}
+              onDragLeave={handleWorkspaceDragLeave}
+              onDragOver={handleWorkspaceDragOver}
+              onDrop={handleWorkspaceDrop}
+            >
+              <div className="workspace-files-actions">
+                <input
+                  accept=".md,.txt,.doc,.json,.yaml,.yml,.toml,.csv,.example"
+                  aria-label="Add workspace files from your computer"
+                  className="workspace-files-input"
+                  multiple
+                  onChange={handleWorkspaceFileUpload}
+                  ref={workspaceFileInputRef}
+                  type="file"
+                />
+                <input
+                  aria-label="Add workspace folder from your computer"
+                  className="workspace-files-input"
+                  multiple
+                  onChange={handleWorkspaceFileUpload}
+                  ref={workspaceFolderInputRef}
+                  type="file"
+                  // Non-standard attributes: directory picks populate `webkitRelativePath` on each `File`.
+                  {...{ webkitdirectory: "", directory: "" }}
+                />
+                <button
+                  className="workspace-files-add"
+                  onClick={() => workspaceFileInputRef.current?.click()}
+                  type="button"
+                >
+                  Add files…
+                </button>
+                <button
+                  className="workspace-files-add"
+                  onClick={() => workspaceFolderInputRef.current?.click()}
+                  type="button"
+                >
+                  Add folder…
+                </button>
+              </div>
+              <p className="workspace-drop-hint">Drop files or a folder here to attach them to the audit.</p>
             </div>
             {uploadError ? (
               <p className="workspace-upload-error" role="status">
@@ -987,16 +1282,50 @@ export default function Home() {
               </p>
             ) : null}
             {uploadedWorkspaceFiles.length > 0 ? (
-              <p className="workspace-upload-summary">
-                <button
-                  className="workspace-upload-clear"
-                  onClick={() => setUploadedWorkspaceFiles([])}
-                  type="button"
-                >
-                  Clear {uploadedWorkspaceFiles.length} added file
-                  {uploadedWorkspaceFiles.length === 1 ? "" : "s"}
-                </button>
-              </p>
+              <div className="workspace-upload-panel">
+                <p className="workspace-upload-count" id="workspace-upload-count">
+                  <strong>{sortedUploadedWorkspaceFiles.length}</strong>{" "}
+                  {sortedUploadedWorkspaceFiles.length === 1 ? "path" : "paths"} attached
+                  {uploadedWorkspaceTopRoots.length > 0 ? (
+                    <>
+                      {" "}
+                      — top level:{" "}
+                      <span className="workspace-upload-roots">{uploadedWorkspaceTopRoots.join(", ")}</span>
+                    </>
+                  ) : null}
+                </p>
+                <ul aria-labelledby="workspace-upload-count" className="workspace-upload-list" role="list">
+                  {sortedUploadedWorkspaceFiles.map((file) => {
+                    const displayPath = stripDemoUploadPrefix(file.path);
+
+                    return (
+                      <li className="workspace-upload-list-item" key={file.path}>
+                        <code className="workspace-upload-path" title={file.path}>
+                          {displayPath}
+                        </code>
+                        <button
+                          aria-label={`Remove ${displayPath} from workspace attachments`}
+                          className="workspace-upload-remove-one"
+                          onClick={() => removeUploadedWorkspaceFile(file.path)}
+                          type="button"
+                        >
+                          Remove
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+                <p className="workspace-upload-summary">
+                  <button
+                    className="workspace-upload-clear"
+                    onClick={() => setUploadedWorkspaceFiles([])}
+                    type="button"
+                  >
+                    Clear {uploadedWorkspaceFiles.length} added file
+                    {uploadedWorkspaceFiles.length === 1 ? "" : "s"}
+                  </button>
+                </p>
+              </div>
             ) : null}
           </div>
 
