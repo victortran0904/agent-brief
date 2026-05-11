@@ -1159,8 +1159,6 @@ test("renders partial analysis reports and falls back when Work Order updates fa
 });
 
 test("packages fetched scan data into the pre-flight handoff", async ({ page }) => {
-  let analyzeRequest: unknown = null;
-
   await page.route("**/api/workspace-scan", async (route) => {
     await route.fulfill({
       contentType: "application/json",
@@ -1190,7 +1188,6 @@ test("packages fetched scan data into the pre-flight handoff", async ({ page }) 
   });
 
   await page.route("**/api/analyze", async (route) => {
-    analyzeRequest = route.request().postDataJSON();
     await route.fulfill({
       contentType: "application/json",
       body: JSON.stringify({
@@ -1217,9 +1214,11 @@ test("packages fetched scan data into the pre-flight handoff", async ({ page }) 
   await page.goto("/");
 
   await expect(page.getByLabel("Workspace file indicators")).toContainText("00-scan-preview-fixture/README.md");
+  const analyzePost = page.waitForRequest(
+    (request) => request.url().includes("/api/analyze") && request.method() === "POST",
+  );
   await page.getByRole("button", { name: "Run Pre-flight Check" }).click();
-
-  const payload = analyzeRequest as {
+  const payload = (await analyzePost).postDataJSON() as {
     task: string;
     context: string;
     workspaceFiles: Array<{ sourceLabel: string; content: string; size: number }>;

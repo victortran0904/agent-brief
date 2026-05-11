@@ -277,15 +277,82 @@ textarea.textarea-auto-grow {
   gap: 8px;
 }
 
+.file-chips {
+  align-content: flex-start;
+  max-height: min(40vh, 280px);
+  overflow-y: auto;
+}
+
 .file-chip,
 .work-order-chip {
+  align-items: center;
   background: rgba(255, 255, 255, 0.02);
   border: 1px solid var(--color-border);
   border-radius: 6px;
   color: var(--color-fog);
+  display: inline-flex;
   font-family: var(--font-mono);
   font-size: 11px;
+  gap: 6px;
   padding: 4px 8px;
+}
+
+.file-chip--upload {
+  border-color: rgba(59, 158, 255, 0.35);
+}
+
+.file-chip-remove {
+  background: transparent;
+  border: 0;
+  color: var(--color-ash);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0;
+}
+
+.file-chip-remove:hover {
+  color: var(--color-frost);
+}
+
+.workspace-files-actions {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.workspace-files-input {
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  height: 1px;
+  overflow: hidden;
+  position: absolute;
+  white-space: nowrap;
+  width: 1px;
+}
+
+.workspace-files-add {
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  color: var(--color-fog);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 6px 12px;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.workspace-files-add:hover {
+  border-color: var(--color-blue);
+  color: var(--color-white);
+}
+
+.workspace-upload-error {
+  color: var(--color-yellow);
+  font-size: 12px;
+  line-height: 1.45;
+  margin: 0 0 10px;
 }
 
 .run-button,
@@ -442,48 +509,78 @@ textarea.textarea-auto-grow {
 }
 
 .nutrition-list {
-  background: var(--color-border);
-  border: 1px solid var(--color-border);
-  border-radius: 10px;
+  border-top: 1px solid var(--color-border);
   display: flex;
   flex-direction: column;
-  gap: 1px;
-  overflow: hidden;
+  margin-top: 4px;
 }
 
 .nutrition-row {
-  background: rgba(0, 0, 0, 0.42);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.nutrition-row:last-child {
+  border-bottom: 0;
 }
 
 .nutrition-trigger {
   align-items: center;
   background: transparent;
   border: 0;
-  color: var(--color-fog);
+  color: var(--color-frost);
   cursor: pointer;
   display: flex;
+  font-size: 13px;
+  font-weight: 500;
+  gap: 12px;
   justify-content: space-between;
-  padding: 11px 14px;
+  padding: 14px 0;
   text-align: left;
   width: 100%;
 }
 
+.nutrition-trigger-label {
+  color: inherit;
+}
+
 .nutrition-row.open .nutrition-trigger {
-  background: rgba(255, 255, 255, 0.045);
   color: var(--color-white);
 }
 
-.nutrition-detail {
-  border-left: 3px solid var(--color-smoke);
-  padding: 0 14px 14px 17px;
+.nutrition-risk {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
 }
 
-.nutrition-row[data-risk="high"].open .nutrition-detail {
+.nutrition-detail {
+  padding: 0 0 14px;
+}
+
+.nutrition-detail-inner {
+  background: rgba(0, 0, 0, 0.22);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  border-left: 3px solid var(--color-border);
+  padding: 12px 14px;
+}
+
+.nutrition-row[data-risk="high"].open .nutrition-detail-inner {
   border-left-color: var(--color-red);
 }
 
-.nutrition-row[data-risk="medium"].open .nutrition-detail {
+.nutrition-row[data-risk="medium"].open .nutrition-detail-inner {
   border-left-color: var(--color-yellow);
+}
+
+.nutrition-row[data-risk="low"].open .nutrition-detail-inner {
+  border-left-color: rgba(255, 255, 255, 0.22);
+}
+
+.nutrition-detail .detail-row:first-child {
+  margin-top: 0;
 }
 
 .detail-row {
