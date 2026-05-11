@@ -739,7 +739,7 @@ export default function Home() {
             </p>
             <div className="workspace-files-actions">
               <input
-                accept=".md,.txt,.json,.yaml,.yml,.toml,.csv,.doc,.example"
+                accept=".md,.txt,.json,.yaml,.yml,.toml,.csv,.example"
                 aria-label="Add workspace files from your computer"
                 className="workspace-files-input"
                 multiple
